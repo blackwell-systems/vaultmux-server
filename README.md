@@ -561,6 +561,20 @@ Structured JSON logs:
 
 **Use vaultmux-server when:** You want runtime secret fetching with backend flexibility (dev uses pass, prod uses AWS).
 
+### Why not a Kubernetes Operator?
+
+vaultmux-server provides runtime secret access via HTTP API, not sync-to-Kubernetes-Secrets. This is intentional.
+
+**For syncing secrets into Kubernetes Secret objects**, use [External Secrets Operator](https://external-secrets.io/).
+
+**vaultmux-server is for:**
+- On-demand secret fetching (not cached in etcd)
+- Runtime backend switching without YAML changes
+- Teams avoiding K8s Secret storage for security
+- Polyglot environments with HTTP preference
+
+Building an operator would duplicate External Secrets Operator's functionality. vaultmux-server fills a different niche: **runtime API access, not declarative sync**.
+
 ### Can I use this outside Kubernetes?
 
 Yes, vaultmux-server is just an HTTP server. Run locally or in VMs. Kubernetes patterns (sidecar, service) are optional.
