@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app-with-vaultmux
+  labels:
+    app: demo-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: demo-app
+  template:
+    metadata:
+      labels:
+        app: demo-app
+    spec:
+      containers:
+      - name: app
+        image: nginx:alpine
+        ports:
+        - containerPort: 80
+        env:
+        - name: VAULTMUX_ENDPOINT
+          value: "http://localhost:8080"
+        volumeMounts:
+        - name: config
+          mountPath: /etc/nginx/conf.d
+          
+      - name: vaultmux-server
+        image: ghcr.io/blackwell-systems/vaultmux-server:latest
+        ports:
+        - containerPort: 8080
+          name: http
+        env:
+        - name: PORT
+          value: "8080"
+        - name: VAULTMUX_BACKEND
+          value: "aws"
+        - name: AWS_REGION
+          value: "us-east-1"
+        resources:
+          limits:
+            cpu: 100m
+            memory: 128Mi
+          requests:
+            cpu: 50m
+            memory: 64Mi
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          
+      volumes:
+      - name: config
+        configMap:
+          name: nginx-config

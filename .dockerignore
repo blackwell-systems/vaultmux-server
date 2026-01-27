@@ -1,0 +1,7 @@
+.git
+.github
+*.md
+examples
+k8s
+helm
+.gitignore

@@ -1,0 +1,606 @@
+# vaultmux-server
+
+> HTTP server for [vaultmux](https://github.com/blackwell-systems/vaultmux) - unified secret management for Kubernetes
+
+[![Blackwell Systems™](https://raw.githubusercontent.com/blackwell-systems/blackwell-docs-theme/main/badge-trademark.svg)](https://github.com/blackwell-systems)
+[![Go Reference](https://pkg.go.dev/badge/github.com/blackwell-systems/vaultmux-server.svg)](https://pkg.go.dev/github.com/blackwell-systems/vaultmux-server)
+[![Go Version](https://img.shields.io/badge/go-1.23+-blue.svg)](https://go.dev/)
+[![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](LICENSE-APACHE)
+
+**Language-agnostic secret management for polyglot Kubernetes environments.** Deploy as sidecar or cluster service. Support 7+ backends (AWS, GCP, Azure, Bitwarden, 1Password, pass, Windows Credential Manager) with zero client SDK dependencies.
+
+```bash
+# Any language, any backend, one HTTP endpoint
+curl http://localhost:8080/v1/secrets/api-key
+```
+
+---
+
+## Why vaultmux-server?
+
+**The Problem:**
+
+Kubernetes teams are polyglot by nature. You have:
+- Python services for ML/data processing
+- Node.js APIs for frontend backends
+- Go microservices for core business logic
+- Rust workers for performance-critical tasks
+
+Each language needs secret management, but requiring native SDKs means:
+- ❌ Maintaining vaultmux ports in 4+ languages
+- ❌ Each team duplicates integration work
+- ❌ No centralized backend switching (dev uses pass, prod uses AWS)
+- ❌ SDK version drift across services
+
+**The Solution:**
+
+vaultmux-server wraps the battle-tested vaultmux library in an HTTP API. All languages fetch secrets with plain HTTP—no SDKs required. Deploy as sidecar (per-pod) or cluster service (shared).
+
+**Benefits:**
+- ✅ Any language with HTTP (Python, Node.js, Go, Rust, Java, C#, Ruby...)
+- ✅ Centralized configuration: change backend without touching app code
+- ✅ Kubernetes-native patterns (sidecar, health checks, graceful shutdown)
+- ✅ ~20MB container, runs on distroless base
+- ✅ Production-ready: used in multi-tenant SaaS platforms
+
+---
+
+## Quick Start (Kubernetes)
+
+### Sidecar Pattern (Recommended)
+
+**Best for:** Per-app secret isolation, different backends per namespace, minimal latency.
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-app
+spec:
+  template:
+    spec:
+      containers:
+      # Your application
+      - name: app
+        image: my-python-app:latest
+        env:
+        - name: VAULTMUX_ENDPOINT
+          value: "http://localhost:8080"
+      
+      # vaultmux-server sidecar
+      - name: vaultmux
+        image: ghcr.io/blackwell-systems/vaultmux-server:latest
+        ports:
+        - containerPort: 8080
+        env:
+        - name: VAULTMUX_BACKEND
+          value: "aws"
+        - name: AWS_REGION
+          value: "us-east-1"
+        resources:
+          limits:
+            cpu: 100m
+            memory: 128Mi
+```
+
+**Your app fetches secrets:**
+
+```python
+# Python
+import requests
+secret = requests.get("http://localhost:8080/v1/secrets/api-key").json()
+print(secret["value"])
+```
+
+```javascript
+// Node.js
+const res = await fetch("http://localhost:8080/v1/secrets/api-key");
+const secret = await res.json();
+console.log(secret.value);
+```
+
+```go
+// Go
+resp, _ := http.Get("http://localhost:8080/v1/secrets/api-key")
+var secret struct{ Value string }
+json.NewDecoder(resp.Body).Decode(&secret)
+```
+
+See [examples/sidecar/](examples/sidecar/) for complete manifests.
+
+---
+
+### Cluster Service Pattern
+
+**Best for:** Shared secrets, lower resource usage, centralized management.
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vaultmux
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: vaultmux
+  template:
+    spec:
+      containers:
+      - name: vaultmux-server
+        image: ghcr.io/blackwell-systems/vaultmux-server:latest
+        env:
+        - name: VAULTMUX_BACKEND
+          value: "gcp"
+        - name: GCP_PROJECT_ID
+          value: "my-project"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vaultmux
+spec:
+  selector:
+    app: vaultmux
+  ports:
+  - port: 8080
+```
+
+**All apps call the service:**
+
+```bash
+# From any pod in the cluster
+curl http://vaultmux.default.svc.cluster.local:8080/v1/secrets/api-key
+```
+
+See [examples/cluster-service/](examples/cluster-service/) for complete manifests.
+
+---
+
+## Use Cases
+
+### Multi-Language Teams
+
+**Scenario:** Platform team supporting Python, Node.js, Go, and Rust services.
+
+**Without vaultmux-server:** Implement secret fetching in 4 languages, maintain 4 SDKs, handle version updates across all services.
+
+**With vaultmux-server:** Deploy once, all services use HTTP. Update backend in one place (ConfigMap).
+
+```yaml
+# Change backend cluster-wide
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vaultmux-config
+data:
+  backend: "aws"  # Change to "gcp" without redeploying apps
+  region: "us-east-1"
+```
+
+---
+
+### Environment-Based Backends
+
+**Scenario:** Development uses `pass` (no cloud credentials), staging uses AWS, production uses GCP.
+
+**Solution:** Same app manifest, different ConfigMap per namespace.
+
+```yaml
+# dev namespace - uses pass (local, no credentials)
+VAULTMUX_BACKEND: pass
+
+# staging namespace - uses AWS
+VAULTMUX_BACKEND: aws
+AWS_REGION: us-east-1
+
+# production namespace - uses GCP
+VAULTMUX_BACKEND: gcp
+GCP_PROJECT_ID: prod-project-123
+```
+
+No code changes. Same container image across all environments.
+
+---
+
+### CI/CD Without Cloud Credentials
+
+**Scenario:** Integration tests need secrets but shouldn't use production AWS/GCP credentials.
+
+**Solution:** Run vaultmux-server with `pass` backend in CI, use cloud backends in deployed environments.
+
+```yaml
+# .github/workflows/integration-test.yml
+services:
+  vaultmux:
+    image: ghcr.io/blackwell-systems/vaultmux-server:latest
+    env:
+      VAULTMUX_BACKEND: pass
+    ports:
+      - 8080:8080
+
+jobs:
+  test:
+    steps:
+      - run: |
+          curl -X POST http://localhost:8080/v1/secrets \
+            -d '{"name":"test-key","value":"test-value"}'
+          pytest tests/integration/
+```
+
+---
+
+## REST API
+
+### List Secrets
+
+```bash
+GET /v1/secrets
+```
+
+**Response:**
+```json
+{
+  "secrets": ["api-key", "db-password", "ssh-key"]
+}
+```
+
+---
+
+### Get Secret
+
+```bash
+GET /v1/secrets/{name}
+```
+
+**Response:**
+```json
+{
+  "name": "api-key",
+  "value": "sk-secret123"
+}
+```
+
+---
+
+### Create Secret
+
+```bash
+POST /v1/secrets
+Content-Type: application/json
+
+{
+  "name": "api-key",
+  "value": "sk-secret123"
+}
+```
+
+**Response:** `201 Created`
+
+---
+
+### Update Secret
+
+```bash
+PUT /v1/secrets/{name}
+Content-Type: application/json
+
+{
+  "value": "sk-newsecret456"
+}
+```
+
+**Response:** `200 OK`
+
+---
+
+### Delete Secret
+
+```bash
+DELETE /v1/secrets/{name}
+```
+
+**Response:** `204 No Content`
+
+---
+
+### Health Check
+
+```bash
+GET /health
+```
+
+**Response:**
+```json
+{
+  "status": "healthy",
+  "backend": "aws"
+}
+```
+
+---
+
+## Supported Backends
+
+| Backend | Environment Variables | Use Case |
+|---------|----------------------|----------|
+| **AWS Secrets Manager** | `AWS_REGION`, `AWS_ENDPOINT` | Production (AWS EKS) |
+| **GCP Secret Manager** | `GCP_PROJECT_ID` | Production (GCP GKE) |
+| **Azure Key Vault** | Azure SDK env vars | Production (Azure AKS) |
+| **pass** | None | Local dev, CI/CD (no cloud) |
+| **Bitwarden** | None (uses `bw` CLI) | Developer workstations |
+| **1Password** | None (uses `op` CLI) | Teams using 1Password |
+| **Windows Credential Manager** | None | Windows development |
+
+---
+
+## Configuration
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PORT` | `8080` | HTTP server port |
+| `VAULTMUX_BACKEND` | `pass` | Backend type: `aws`, `gcp`, `azure`, `pass`, `bitwarden`, `1password`, `wincred` |
+| `VAULTMUX_PREFIX` | `vaultmux` | Secret name prefix |
+| `AWS_REGION` | - | AWS region (required for AWS backend) |
+| `AWS_ENDPOINT` | - | AWS endpoint override (for LocalStack) |
+| `GCP_PROJECT_ID` | - | GCP project ID (required for GCP backend) |
+
+---
+
+## Helm Installation
+
+```bash
+# Install from Helm repo (once published)
+helm repo add blackwell-systems https://blackwell-systems.github.io/charts
+
+# Deploy as cluster service
+helm install vaultmux blackwell-systems/vaultmux-server \
+  --set backend.type=aws \
+  --set aws.region=us-east-1
+
+# Deploy with sidecar injection
+helm install vaultmux blackwell-systems/vaultmux-server \
+  --set sidecar.enabled=true
+```
+
+**Custom values:**
+
+```yaml
+# values.yaml
+replicaCount: 3
+
+backend:
+  type: gcp
+  prefix: myapp
+
+gcp:
+  projectId: prod-project-123
+
+resources:
+  limits:
+    cpu: 200m
+    memory: 256Mi
+```
+
+```bash
+helm install vaultmux blackwell-systems/vaultmux-server -f values.yaml
+```
+
+See [helm/vaultmux-server/](helm/vaultmux-server/) for full chart documentation.
+
+---
+
+## Architecture
+
+```
+┌─────────────────────────────────────────┐
+│           Kubernetes Cluster            │
+├─────────────────────────────────────────┤
+│  ┌────────────┐     ┌────────────┐     │
+│  │ Python App │────▶│ Node.js App│     │
+│  └─────┬──────┘     └──────┬─────┘     │
+│        │ HTTP               │ HTTP      │
+│        └────────┬───────────┘           │
+│                 ▼                        │
+│        ┌────────────────┐               │
+│        │ vaultmux-server│               │
+│        │   (REST API)   │               │
+│        └────────┬───────┘               │
+│                 │                        │
+│        ┌────────┴────────┐              │
+│        ▼                 ▼              │
+│   [pass (dev)]    [AWS Secrets (prod)] │
+│                    [GCP Secrets (stg)]  │
+└─────────────────────────────────────────┘
+```
+
+---
+
+## Deployment Patterns Comparison
+
+| Pattern | Latency | Resource Usage | Isolation | Best For |
+|---------|---------|----------------|-----------|----------|
+| **Sidecar** | ~1ms (localhost) | High (one per pod) | Per-app | Different backends per namespace, strict isolation |
+| **Cluster Service** | ~5-10ms (in-cluster) | Low (2-3 replicas total) | Shared | Centralized management, cost optimization |
+
+**Recommendation:** Start with sidecar for flexibility, move to cluster service if resource usage is a concern.
+
+---
+
+## Security Considerations
+
+### Network Isolation
+- vaultmux-server runs **inside** the cluster, not exposed to internet
+- Use Kubernetes NetworkPolicies to restrict pod-to-pod access
+- Consider service mesh (Istio, Linkerd) for mTLS between pods
+
+### Authentication
+- No built-in authentication (relies on network isolation)
+- Backend credentials use IAM roles (AWS), Workload Identity (GCP), Managed Identity (Azure)
+- Never store cloud credentials in pods—use native identity mechanisms
+
+### Secrets in Transit
+- Sidecar: localhost traffic (no TLS needed)
+- Cluster service: use service mesh for mTLS
+
+---
+
+## Local Development
+
+### Run Without Kubernetes
+
+```bash
+# Install
+go install github.com/blackwell-systems/vaultmux-server/cmd/server@latest
+
+# Run with pass backend
+VAULTMUX_BACKEND=pass server
+
+# Run with AWS (using LocalStack)
+VAULTMUX_BACKEND=aws \
+  AWS_REGION=us-east-1 \
+  AWS_ENDPOINT=http://localhost:4566 \
+  server
+```
+
+### Build from Source
+
+```bash
+# Clone
+git clone https://github.com/blackwell-systems/vaultmux-server
+cd vaultmux-server
+
+# Build
+go build -o vaultmux-server ./cmd/server
+
+# Run
+./vaultmux-server
+```
+
+### Docker
+
+```bash
+# Build
+docker build -t vaultmux-server:latest .
+
+# Run
+docker run -p 8080:8080 \
+  -e VAULTMUX_BACKEND=pass \
+  vaultmux-server:latest
+```
+
+---
+
+## Trade-offs: Library vs Server
+
+| Aspect | vaultmux (library) | vaultmux-server |
+|--------|-------------------|-----------------|
+| **Performance** | Fastest (in-process) | Network hop (~1-10ms) |
+| **Language support** | Go only | All languages |
+| **Type safety** | Full Go types | JSON over HTTP |
+| **Deployment complexity** | App-level | Kubernetes sidecar/service |
+| **Configuration** | Per-app code | Centralized ConfigMap |
+| **Best for** | Go-only teams | Polyglot Kubernetes environments |
+
+**Use the library when:** Building Go-only applications where type safety matters.
+
+**Use vaultmux-server when:** Kubernetes cluster with multiple languages or want centralized backend switching.
+
+---
+
+## Observability
+
+### Metrics (Roadmap)
+
+vaultmux-server will expose Prometheus metrics on `/metrics`:
+
+- `vaultmux_requests_total{method, status}` - Request count by endpoint
+- `vaultmux_request_duration_seconds{method}` - Request latency
+- `vaultmux_backend_errors_total{backend}` - Backend error count
+
+### Logging
+
+Structured JSON logs:
+
+```json
+{
+  "level": "info",
+  "method": "GET",
+  "path": "/v1/secrets/api-key",
+  "status": 200,
+  "latency": "12ms",
+  "client_ip": "10.244.1.5"
+}
+```
+
+---
+
+## FAQ
+
+### Why not External Secrets Operator?
+
+**External Secrets Operator** syncs secrets from cloud providers into Kubernetes Secrets. vaultmux-server fetches secrets on-demand via HTTP.
+
+**Use External Secrets when:** You want secrets as native Kubernetes Secrets.
+
+**Use vaultmux-server when:** You want runtime secret fetching with backend flexibility (dev uses pass, prod uses AWS).
+
+### Can I use this outside Kubernetes?
+
+Yes, vaultmux-server is just an HTTP server. Run locally or in VMs. Kubernetes patterns (sidecar, service) are optional.
+
+### Does this cache secrets?
+
+Not currently. Each request hits the backend. Future versions may add caching with configurable TTL.
+
+### What about secret rotation?
+
+Secret rotation happens at the backend level (AWS Secrets Manager rotation, Bitwarden sync). vaultmux-server always fetches the latest version.
+
+---
+
+## Contributing
+
+Contributions welcome! Areas for improvement:
+
+- [ ] Prometheus metrics
+- [ ] Secret caching with TTL
+- [ ] OpenTelemetry tracing
+- [ ] Kubernetes operator for auto-injection
+- [ ] mTLS support
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+---
+
+## Related Projects
+
+- **[vaultmux](https://github.com/blackwell-systems/vaultmux)** - The Go library this server wraps
+- **[vaultmux-rs](https://github.com/blackwell-systems/vaultmux-rs)** - Rust port of vaultmux
+
+---
+
+## License
+
+Licensed under either of:
+
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
+- MIT license ([LICENSE-MIT](LICENSE-MIT) or http://opensource.org/licenses/MIT)
+
+at your option.
+
+---
+
+## Brand
+
+The **code** in this repository is dual-licensed (MIT OR Apache 2.0). The **Blackwell Systems™** name and logo are protected trademarks. See [BRAND.md](BRAND.md) for usage guidelines.
+
+---
+
+## Maintained By
+
+**Dayna Blackwell** — founder of Blackwell Systems, building reference infrastructure for cloud-native development.
+
+[GitHub](https://github.com/blackwell-systems) · [LinkedIn](https://linkedin.com/in/dayna-blackwell) · [Blog](https://blog.blackwell-systems.com)

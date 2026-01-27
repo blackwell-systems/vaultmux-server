@@ -1,0 +1,91 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vaultmux-server
+  labels:
+    app: vaultmux-server
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: vaultmux-server
+  template:
+    metadata:
+      labels:
+        app: vaultmux-server
+    spec:
+      containers:
+      - name: vaultmux-server
+        image: ghcr.io/blackwell-systems/vaultmux-server:latest
+        ports:
+        - containerPort: 8080
+          name: http
+        env:
+        - name: PORT
+          value: "8080"
+        - name: VAULTMUX_BACKEND
+          valueFrom:
+            configMapKeyRef:
+              name: vaultmux-config
+              key: backend
+        - name: VAULTMUX_PREFIX
+          valueFrom:
+            configMapKeyRef:
+              name: vaultmux-config
+              key: prefix
+        - name: AWS_REGION
+          valueFrom:
+            configMapKeyRef:
+              name: vaultmux-config
+              key: aws_region
+              optional: true
+        - name: GCP_PROJECT_ID
+          valueFrom:
+            configMapKeyRef:
+              name: vaultmux-config
+              key: gcp_project_id
+              optional: true
+        resources:
+          limits:
+            cpu: 200m
+            memory: 256Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vaultmux
+  labels:
+    app: vaultmux-server
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8080
+    targetPort: 8080
+    protocol: TCP
+    name: http
+  selector:
+    app: vaultmux-server
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vaultmux-config
+data:
+  backend: "aws"
+  prefix: "myapp"
+  aws_region: "us-east-1"
