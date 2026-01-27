@@ -9,7 +9,7 @@
 [![Docker](https://img.shields.io/badge/Docker-2496ED?logo=docker&logoColor=white)](https://hub.docker.com/)
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](LICENSE-APACHE)
 
-**Language-agnostic secret management for polyglot Kubernetes environments.** Deploy as sidecar or cluster service. Supports AWS Secrets Manager, GCP Secret Manager, and Azure Key Vault with zero client SDK dependencies.
+**Language-agnostic secret management for polyglot Kubernetes environments.** Deploy as sidecar or shared service. Supports AWS Secrets Manager, GCP Secret Manager, and Azure Key Vault with zero client SDK dependencies.
 
 ```bash
 # Any language, any backend, one HTTP endpoint
@@ -27,7 +27,7 @@ Kubernetes teams run polyglot stacks: Python services for ML, Node.js APIs, Go m
 - No centralized backend switching (dev uses pass, prod uses AWS)
 - SDK version drift across services
 
-vaultmux-server wraps the battle-tested vaultmux library in an HTTP API. All languages fetch secrets with plain HTTP—no SDKs required. Deploy as sidecar (per-pod isolation) or cluster service (shared).
+vaultmux-server wraps the battle-tested vaultmux library in an HTTP API. All languages fetch secrets with plain HTTP—no SDKs required. Deploy as sidecar (per-pod isolation) or shared service (centralized).
 
 Works with any language that can make HTTP requests: Python, Node.js, Go, Rust, Java, C#, Ruby. Centralized configuration means changing cloud providers doesn't require touching application code. Kubernetes-native deployment patterns with health checks, graceful shutdown, and ~20MB distroless containers.
 
@@ -351,7 +351,7 @@ GET /health
 # Install from Helm repo (once published)
 helm repo add blackwell-systems https://blackwell-systems.github.io/charts
 
-# Deploy as cluster service
+# Deploy as shared service
 helm install vaultmux blackwell-systems/vaultmux-server \
   --set backend.type=aws \
   --set aws.region=us-east-1
@@ -419,9 +419,9 @@ See [helm/vaultmux-server/](helm/vaultmux-server/) for full chart documentation.
 | Pattern | Latency | Resource Usage | Isolation | Best For |
 |---------|---------|----------------|-----------|----------|
 | **Sidecar** | ~1ms (localhost) | High (one per pod) | Per-app | Different backends per namespace, strict isolation |
-| **Cluster Service** | ~5-10ms (in-cluster) | Low (2-3 replicas total) | Shared | Centralized management, cost optimization |
+| **Shared Service** | ~5-10ms (in-cluster) | Low (2-3 replicas total) | Shared | Centralized management, cost optimization |
 
-**Recommendation:** Start with sidecar for flexibility, move to cluster service if resource usage is a concern.
+**Recommendation:** Start with sidecar for flexibility, move to shared service if resource usage is a concern.
 
 ---
 
@@ -450,7 +450,7 @@ Cloud provider enforces the authorization boundary. No HTTP-level RBAC needed.
 
 **[📖 Complete sidecar setup guide](docs/SIDECAR_RBAC.md)** - Step-by-step instructions for AWS IRSA, GCP Workload Identity, and Azure Managed Identity.
 
-**Cluster Service Pattern:**
+**Shared Service Pattern:**
 
 Currently relies on network isolation (any pod in cluster can call API). For multi-tenant isolation without IAM, HTTP-level RBAC is on the roadmap (authenticate Kubernetes service account tokens, authorize based on namespace).
 
@@ -458,7 +458,7 @@ Use sidecar pattern if you need namespace isolation today.
 
 ### Secrets in Transit
 - Sidecar: localhost traffic (no TLS needed)
-- Cluster service: use service mesh for mTLS
+- Shared service: use service mesh for mTLS
 
 ---
 
@@ -611,7 +611,7 @@ Secret rotation happens at the backend level (AWS Secrets Manager rotation, Bitw
 See [ROADMAP.md](ROADMAP.md) for planned features and development priorities.
 
 **Upcoming:**
-- HTTP-level RBAC for cluster service pattern (under consideration)
+- HTTP-level RBAC for shared service pattern (under consideration)
 - Prometheus metrics
 - OpenAPI spec generation
 
