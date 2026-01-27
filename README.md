@@ -20,30 +20,16 @@ curl http://localhost:8080/v1/secrets/api-key
 
 ## Why vaultmux-server?
 
-**The Problem:**
+Kubernetes teams run polyglot stacks: Python services for ML, Node.js APIs, Go microservices, Rust workers. Each language needs secret management, but native SDKs create friction:
 
-Kubernetes teams are polyglot by nature. You have:
-- Python services for ML/data processing
-- Node.js APIs for frontend backends
-- Go microservices for core business logic
-- Rust workers for performance-critical tasks
-
-Each language needs secret management, but requiring native SDKs means:
 - Maintaining vaultmux ports in 4+ languages
-- Each team duplicates integration work
+- Each team duplicates integration work  
 - No centralized backend switching (dev uses pass, prod uses AWS)
 - SDK version drift across services
 
-**The Solution:**
+vaultmux-server wraps the battle-tested vaultmux library in an HTTP API. All languages fetch secrets with plain HTTP—no SDKs required. Deploy as sidecar (per-pod isolation) or cluster service (shared).
 
-vaultmux-server wraps the battle-tested vaultmux library in an HTTP API. All languages fetch secrets with plain HTTP—no SDKs required. Deploy as sidecar (per-pod) or cluster service (shared).
-
-**Benefits:**
-- Any language with HTTP (Python, Node.js, Go, Rust, Java, C#, Ruby...)
-- Centralized configuration: change backend without touching app code
-- Kubernetes-native patterns (sidecar, health checks, graceful shutdown)
-- ~20MB container, runs on distroless base
-- Production-ready: used in multi-tenant SaaS platforms
+Works with any language that can make HTTP requests: Python, Node.js, Go, Rust, Java, C#, Ruby. Centralized configuration means changing cloud providers doesn't require touching application code. Kubernetes-native deployment patterns with health checks, graceful shutdown, and ~20MB distroless containers.
 
 ---
 
