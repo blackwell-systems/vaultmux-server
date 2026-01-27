@@ -27,21 +27,21 @@ Kubernetes teams are polyglot by nature. You have:
 - Rust workers for performance-critical tasks
 
 Each language needs secret management, but requiring native SDKs means:
-- ❌ Maintaining vaultmux ports in 4+ languages
-- ❌ Each team duplicates integration work
-- ❌ No centralized backend switching (dev uses pass, prod uses AWS)
-- ❌ SDK version drift across services
+- Maintaining vaultmux ports in 4+ languages
+- Each team duplicates integration work
+- No centralized backend switching (dev uses pass, prod uses AWS)
+- SDK version drift across services
 
 **The Solution:**
 
 vaultmux-server wraps the battle-tested vaultmux library in an HTTP API. All languages fetch secrets with plain HTTP—no SDKs required. Deploy as sidecar (per-pod) or cluster service (shared).
 
 **Benefits:**
-- ✅ Any language with HTTP (Python, Node.js, Go, Rust, Java, C#, Ruby...)
-- ✅ Centralized configuration: change backend without touching app code
-- ✅ Kubernetes-native patterns (sidecar, health checks, graceful shutdown)
-- ✅ ~20MB container, runs on distroless base
-- ✅ Production-ready: used in multi-tenant SaaS platforms
+- Any language with HTTP (Python, Node.js, Go, Rust, Java, C#, Ruby...)
+- Centralized configuration: change backend without touching app code
+- Kubernetes-native patterns (sidecar, health checks, graceful shutdown)
+- ~20MB container, runs on distroless base
+- Production-ready: used in multi-tenant SaaS platforms
 
 ---
 
