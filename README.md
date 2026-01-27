@@ -7,7 +7,7 @@
 [![Go Version](https://img.shields.io/badge/go-1.23+-blue.svg)](https://go.dev/)
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](LICENSE-APACHE)
 
-**Language-agnostic secret management for polyglot Kubernetes environments.** Deploy as sidecar or cluster service. Supports AWS Secrets Manager, GCP Secret Manager, Azure Key Vault, and pass (local/CI) with zero client SDK dependencies.
+**Language-agnostic secret management for polyglot Kubernetes environments.** Deploy as sidecar or cluster service. Supports AWS Secrets Manager, GCP Secret Manager, and Azure Key Vault with zero client SDK dependencies.
 
 ```bash
 # Any language, any backend, one HTTP endpoint
@@ -182,14 +182,11 @@ data:
 
 ### Environment-Based Backends
 
-**Scenario:** Development uses `pass` (no cloud credentials), staging uses AWS, production uses GCP.
+**Scenario:** Staging uses AWS Secrets Manager, production uses GCP Secret Manager.
 
 **Solution:** Same app manifest, different ConfigMap per namespace.
 
 ```yaml
-# dev namespace - uses pass (local, no credentials)
-VAULTMUX_BACKEND: pass
-
 # staging namespace - uses AWS
 VAULTMUX_BACKEND: aws
 AWS_REGION: us-east-1
@@ -203,19 +200,26 @@ No code changes. Same container image across all environments.
 
 ---
 
-### CI/CD Without Cloud Credentials
+### CI/CD Testing
 
-**Scenario:** Integration tests need secrets but shouldn't use production AWS/GCP credentials.
+**Scenario:** Integration tests need secrets without using production credentials.
 
-**Solution:** Run vaultmux-server with `pass` backend in CI, use cloud backends in deployed environments.
+**Solution:** Run vaultmux-server with emulator backends (LocalStack for AWS, GCP Secret Manager Emulator for GCP).
 
 ```yaml
 # .github/workflows/integration-test.yml
 services:
+  localstack:
+    image: localstack/localstack:latest
+    ports:
+      - 4566:4566
+  
   vaultmux:
     image: ghcr.io/blackwell-systems/vaultmux-server:latest
     env:
-      VAULTMUX_BACKEND: pass
+      VAULTMUX_BACKEND: aws
+      AWS_REGION: us-east-1
+      AWS_ENDPOINT: http://localstack:4566
     ports:
       - 8080:8080
 
@@ -223,8 +227,12 @@ jobs:
   test:
     steps:
       - run: |
-          curl -X POST http://localhost:8080/v1/secrets \
-            -d '{"name":"test-key","value":"test-value"}'
+          # Create test secret in LocalStack
+          aws --endpoint-url=http://localhost:4566 secretsmanager create-secret \
+            --name test-key --secret-string test-value
+          
+          # Test vaultmux-server
+          curl http://localhost:8080/v1/secrets/test-key
           pytest tests/integration/
 ```
 
@@ -327,9 +335,10 @@ GET /health
 | **AWS Secrets Manager** | `AWS_REGION`, `AWS_ENDPOINT` | Production (AWS EKS) |
 | **GCP Secret Manager** | `GCP_PROJECT_ID` | Production (GCP GKE) |
 | **Azure Key Vault** | Azure SDK env vars | Production (Azure AKS) |
-| **pass** | None | Local dev, CI/CD (no cloud credentials) |
 
-**Note:** vaultmux-server focuses on production Kubernetes backends. For developer workstation tools (Bitwarden, 1Password, Windows Credential Manager), use the [vaultmux library](https://github.com/blackwell-systems/vaultmux) directly.
+**For CI/CD testing:** Use emulators ([LocalStack](https://localstack.cloud/) for AWS, [GCP Secret Manager Emulator](https://github.com/blackwell-systems/gcp-secret-manager-emulator) for GCP) with endpoint overrides (`AWS_ENDPOINT`, etc).
+
+**For developer workstations:** Use the [vaultmux library](https://github.com/blackwell-systems/vaultmux) directly for Bitwarden, 1Password, pass, or Windows Credential Manager integration.
 
 ---
 
@@ -340,10 +349,10 @@ GET /health
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PORT` | `8080` | HTTP server port |
-| `VAULTMUX_BACKEND` | `pass` | Backend type: `aws`, `gcp`, `azure`, `pass`, `bitwarden`, `1password`, `wincred` |
+| `VAULTMUX_BACKEND` | - | Backend type: `aws`, `gcp`, `azure` (required) |
 | `VAULTMUX_PREFIX` | `vaultmux` | Secret name prefix |
 | `AWS_REGION` | - | AWS region (required for AWS backend) |
-| `AWS_ENDPOINT` | - | AWS endpoint override (for LocalStack) |
+| `AWS_ENDPOINT` | - | AWS endpoint override (for LocalStack/emulators) |
 | `GCP_PROJECT_ID` | - | GCP project ID (required for GCP backend) |
 
 ---
@@ -454,13 +463,15 @@ See [helm/vaultmux-server/](helm/vaultmux-server/) for full chart documentation.
 # Install
 go install github.com/blackwell-systems/vaultmux-server/cmd/server@latest
 
-# Run with pass backend
-VAULTMUX_BACKEND=pass server
-
-# Run with AWS (using LocalStack)
+# Run with AWS (using LocalStack for local testing)
 VAULTMUX_BACKEND=aws \
   AWS_REGION=us-east-1 \
   AWS_ENDPOINT=http://localhost:4566 \
+  server
+
+# Run with GCP Secret Manager
+VAULTMUX_BACKEND=gcp \
+  GCP_PROJECT_ID=my-project \
   server
 ```
 
@@ -484,9 +495,11 @@ go build -o vaultmux-server ./cmd/server
 # Build
 docker build -t vaultmux-server:latest .
 
-# Run
+# Run with LocalStack
 docker run -p 8080:8080 \
-  -e VAULTMUX_BACKEND=pass \
+  -e VAULTMUX_BACKEND=aws \
+  -e AWS_REGION=us-east-1 \
+  -e AWS_ENDPOINT=http://localstack:4566 \
   vaultmux-server:latest
 ```
 
