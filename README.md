@@ -1,6 +1,6 @@
 # vaultmux-server
 
-> HTTP server for [vaultmux](https://github.com/blackwell-systems/vaultmux) - unified secret management for Kubernetes
+> Language-agnostic secrets control plane for Kubernetes and cloud-native systems
 
 [![Blackwell Systems™](https://raw.githubusercontent.com/blackwell-systems/blackwell-docs-theme/main/badge-trademark.svg)](https://github.com/blackwell-systems)
 [![Go Reference](https://pkg.go.dev/badge/github.com/blackwell-systems/vaultmux-server.svg)](https://pkg.go.dev/github.com/blackwell-systems/vaultmux-server)
