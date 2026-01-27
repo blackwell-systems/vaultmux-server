@@ -1,3 +1,22 @@
+// Command server provides an HTTP API for vaultmux secret management.
+//
+// vaultmux-server is a language-agnostic secrets control plane for Kubernetes
+// and cloud-native systems. It wraps the vaultmux library in a REST API,
+// enabling polyglot environments to use unified secret management without
+// language-specific SDK dependencies.
+//
+// Supported backends:
+//   - AWS Secrets Manager (awssecrets)
+//   - GCP Secret Manager (gcpsecrets)
+//   - Azure Key Vault (azurekeyvault)
+//
+// Usage:
+//
+//	VAULTMUX_BACKEND=awssecrets \
+//	  AWS_REGION=us-east-1 \
+//	  server
+//
+// See https://github.com/blackwell-systems/vaultmux-server for complete documentation.
 package main
 
 import (
