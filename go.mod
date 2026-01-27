@@ -1,6 +1,6 @@
 module github.com/blackwell-systems/vaultmux-server
 
-go 1.25.5
+go 1.24.0
 
 require (
 	github.com/blackwell-systems/vaultmux v1.0.1
