@@ -28,13 +28,14 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/gin-gonic/gin"
+
 	"github.com/blackwell-systems/vaultmux"
-	"github.com/blackwell-systems/vaultmux-server/handlers"
-	"github.com/blackwell-systems/vaultmux-server/middleware"
 	_ "github.com/blackwell-systems/vaultmux/backends/awssecrets"
 	_ "github.com/blackwell-systems/vaultmux/backends/azurekeyvault"
 	_ "github.com/blackwell-systems/vaultmux/backends/gcpsecrets"
-	"github.com/gin-gonic/gin"
+	"github.com/blackwell-systems/vaultmux-server/handlers"
+	"github.com/blackwell-systems/vaultmux-server/middleware"
 )
 
 func main() {
