@@ -589,17 +589,20 @@ Secret rotation happens at the backend level (AWS Secrets Manager rotation, Bitw
 
 ---
 
+## Roadmap
+
+See [ROADMAP.md](ROADMAP.md) for planned features and development priorities.
+
+**Upcoming:**
+- HTTP-level RBAC for cluster service pattern (under consideration)
+- Prometheus metrics
+- OpenAPI spec generation
+
+---
+
 ## Contributing
 
-Contributions welcome! Areas for improvement:
-
-- [ ] Prometheus metrics
-- [ ] Secret caching with TTL
-- [ ] OpenTelemetry tracing
-- [ ] Kubernetes operator for auto-injection
-- [ ] mTLS support
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+Contributions welcome! See [ROADMAP.md](ROADMAP.md) for planned features and [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ---
 
