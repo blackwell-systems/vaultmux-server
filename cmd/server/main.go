@@ -10,6 +10,9 @@ import (
 	"time"
 
 	"github.com/blackwell-systems/vaultmux"
+	_ "github.com/blackwell-systems/vaultmux/backends/awssecrets"
+	_ "github.com/blackwell-systems/vaultmux/backends/azurekeyvault"
+	_ "github.com/blackwell-systems/vaultmux/backends/gcpsecrets"
 	"github.com/blackwell-systems/vaultmux-server/handlers"
 	"github.com/blackwell-systems/vaultmux-server/middleware"
 	"github.com/gin-gonic/gin"
@@ -17,7 +20,21 @@ import (
 
 func main() {
 	port := getEnv("PORT", "8080")
-	backendType := getEnv("VAULTMUX_BACKEND", "pass")
+	backendType := getEnv("VAULTMUX_BACKEND", "")
+	
+	if backendType == "" {
+		log.Fatal("VAULTMUX_BACKEND environment variable is required (aws, gcp, or azure)")
+	}
+	
+	supportedBackends := map[string]bool{
+		"awssecrets":   true,
+		"gcpsecrets":   true,
+		"azurekeyvault": true,
+	}
+	
+	if !supportedBackends[backendType] {
+		log.Fatalf("Unsupported backend: %s. vaultmux-server supports: awssecrets, gcpsecrets, azurekeyvault. For other backends (pass, bitwarden, 1password), use the vaultmux library directly.", backendType)
+	}
 	
 	backend, err := vaultmux.New(vaultmux.Config{
 		Backend: vaultmux.BackendType(backendType),
