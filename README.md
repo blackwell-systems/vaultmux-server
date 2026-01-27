@@ -33,6 +33,30 @@ Works with any language that can make HTTP requests: Python, Node.js, Go, Rust, 
 
 ---
 
+## Architectural Model
+
+vaultmux-server treats Kubernetes as compute, not storage. Secrets stay in your cloud vault (AWS Secrets Manager, GCP Secret Manager, Azure Key Vault) and are fetched at runtime. The cluster never becomes your system of record.
+
+| Approach | Secret Storage | Cluster Lifecycle Coupling |
+|----------|----------------|----------------------------|
+| **Kubernetes Secrets** | etcd | Secrets live and die with cluster |
+| **External Secrets Operator** | etcd (synced from vault) | Secrets replicated into cluster state |
+| **vaultmux-server** | Cloud vault only | Cluster is stateless |
+
+When you rebuild a cluster, Kubernetes Secrets require restore from backup. External Secrets Operator requires reinstalling the operator and waiting for reconciliation. vaultmux-server requires deploying the HTTP proxy—your secrets are already where they belong.
+
+**Authorization boundary:** Cloud IAM, not cluster RBAC. With sidecar deployment, each namespace maps to a cloud identity (AWS IRSA, GCP Workload Identity, Azure Managed Identity). The `test` namespace literally cannot decrypt `prod` secrets, even with cluster admin access. The cloud provider enforces this, not Kubernetes.
+
+**Trade-offs:**
+- Network call to vault at runtime (~5-10ms vs <1ms for local Secrets)
+- Vault must be reachable (offline clusters need cached credentials)
+- Simpler disaster recovery (cluster state is disposable)
+- Smaller blast radius (cluster compromise doesn't mean secret compromise)
+
+Use Kubernetes Secrets if you want declarative management and are comfortable with secrets in etcd. Use External Secrets Operator if you want cloud-backed secrets but still want them synced to the cluster. Use vaultmux-server if your threat model requires secrets outside cluster state entirely.
+
+---
+
 ## Quick Start (Kubernetes)
 
 ### Sidecar Pattern (Recommended)
