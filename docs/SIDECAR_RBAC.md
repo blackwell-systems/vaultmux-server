@@ -2,6 +2,32 @@
 
 This guide shows how to deploy vaultmux-server as a sidecar with namespace isolation using cloud provider IAM.
 
+---
+
+## Why the Sidecar Pattern Exists
+
+Kubernetes does not provide runtime secret isolation by default. If you use Kubernetes Secrets or CRDs, secrets ultimately live in **etcd** and are governed by **cluster RBAC**, not by cloud IAM.
+
+The sidecar pattern solves a different problem:
+
+> **Runtime access control enforced by the cloud provider, not the cluster.**
+
+By running vaultmux-server as a sidecar:
+- Each namespace gets its **own identity**
+- Each identity maps to **cloud IAM**
+- The cloud provider becomes the **source of truth**
+- Secrets are **never stored in etcd**
+- Test pods literally *cannot* access prod secrets, even if misconfigured
+
+This gives you **hard isolation at the cloud boundary**, not just "best effort" isolation inside Kubernetes.
+
+**The trust model:**
+- ❌ Don't trust: Kubernetes RBAC (can be misconfigured)
+- ❌ Don't trust: Network policies (can have holes)
+- ✅ Trust: Cloud provider IAM (enforced at API level, outside cluster)
+
+---
+
 ## Overview
 
 The sidecar pattern provides namespace-level secret isolation by leveraging Kubernetes service accounts mapped to cloud IAM identities. Each namespace gets its own vaultmux-server pod with separate IAM permissions.
