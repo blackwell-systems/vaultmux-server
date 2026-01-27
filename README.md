@@ -7,7 +7,7 @@
 [![Go Version](https://img.shields.io/badge/go-1.23+-blue.svg)](https://go.dev/)
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](LICENSE-APACHE)
 
-**Language-agnostic secret management for polyglot Kubernetes environments.** Deploy as sidecar or cluster service. Support 7+ backends (AWS, GCP, Azure, Bitwarden, 1Password, pass, Windows Credential Manager) with zero client SDK dependencies.
+**Language-agnostic secret management for polyglot Kubernetes environments.** Deploy as sidecar or cluster service. Supports AWS Secrets Manager, GCP Secret Manager, Azure Key Vault, and pass (local/CI) with zero client SDK dependencies.
 
 ```bash
 # Any language, any backend, one HTTP endpoint
@@ -327,10 +327,9 @@ GET /health
 | **AWS Secrets Manager** | `AWS_REGION`, `AWS_ENDPOINT` | Production (AWS EKS) |
 | **GCP Secret Manager** | `GCP_PROJECT_ID` | Production (GCP GKE) |
 | **Azure Key Vault** | Azure SDK env vars | Production (Azure AKS) |
-| **pass** | None | Local dev, CI/CD (no cloud) |
-| **Bitwarden** | None (uses `bw` CLI) | Developer workstations |
-| **1Password** | None (uses `op` CLI) | Teams using 1Password |
-| **Windows Credential Manager** | None | Windows development |
+| **pass** | None | Local dev, CI/CD (no cloud credentials) |
+
+**Note:** vaultmux-server focuses on production Kubernetes backends. For developer workstation tools (Bitwarden, 1Password, Windows Credential Manager), use the [vaultmux library](https://github.com/blackwell-systems/vaultmux) directly.
 
 ---
 
