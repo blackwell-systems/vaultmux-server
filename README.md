@@ -414,14 +414,33 @@ See [helm/vaultmux-server/](helm/vaultmux-server/) for full chart documentation.
 
 ---
 
-## Deployment Patterns Comparison
+## Deployment Patterns
+
+vaultmux-server supports two deployment patterns, each with different security and isolation characteristics.
+
+### Understanding the Sidecar Pattern
+
+Kubernetes does not provide runtime secret isolation by default. If you use Kubernetes Secrets or CRDs, secrets ultimately live in etcd and are governed by cluster RBAC, not cloud IAM.
+
+The sidecar pattern solves a different problem: **runtime access control enforced by the cloud provider, not the cluster.**
+
+By running vaultmux-server as a sidecar:
+- Each namespace gets its own identity
+- Each identity maps to cloud IAM (AWS IRSA, GCP Workload Identity, Azure Managed Identity)
+- The cloud provider becomes the source of truth
+- Secrets are never stored in etcd
+- Test pods literally cannot access prod secrets, even if misconfigured
+
+This gives you **hard isolation at the cloud boundary**, not just "best effort" isolation inside Kubernetes.
+
+### Pattern Comparison
 
 | Pattern | Latency | Resource Usage | Isolation | Best For |
 |---------|---------|----------------|-----------|----------|
 | **Sidecar** | ~1ms (localhost) | High (one per pod) | Per-app | Different backends per namespace, strict isolation |
 | **Shared Service** | ~5-10ms (in-cluster) | Low (2-3 replicas total) | Shared | Centralized management, cost optimization |
 
-**Recommendation:** Start with sidecar for flexibility, move to shared service if resource usage is a concern.
+**Recommendation:** Start with sidecar for multi-tenant isolation, move to shared service for dev/test environments or cost optimization.
 
 ---
 
