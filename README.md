@@ -549,17 +549,29 @@ Structured JSON logs:
 
 ### Why not a Kubernetes Operator?
 
-vaultmux-server provides runtime secret access via HTTP API, not sync-to-Kubernetes-Secrets. This is intentional.
+CRDs and operators inject external state into the Kubernetes control plane: data lives in etcd, operators reconcile it. That's powerful, but it makes the control plane part of your secret lifecycle.
 
-**For syncing secrets into Kubernetes Secret objects**, use [External Secrets Operator](https://external-secrets.io/).
+vaultmux-server takes the opposite approach: keep secrets outside cluster state entirely. Kubernetes is just one runtime it can live in, not the system of record.
 
-**vaultmux-server is for:**
-- On-demand secret fetching (not cached in etcd)
-- Runtime backend switching without YAML changes
-- Teams avoiding K8s Secret storage for security
-- Polyglot environments with HTTP preference
+**Operator pattern (External Secrets Operator):**
+```
+K8s API → etcd → operator → external secret backend
+```
+Secrets stored in cluster state, declarative reconciliation
 
-Building an operator would duplicate External Secrets Operator's functionality. vaultmux-server fills a different niche: **runtime API access, not declarative sync**.
+**vaultmux-server pattern:**
+```
+App → vaultmux-server → external secret backend
+```
+No reconciliation loop, no control-plane storage, runtime access only
+
+**Use operators when:** You want secrets as native Kubernetes Secrets with declarative management
+
+**Use vaultmux-server when:**
+- Secrets must stay outside cluster state (security requirement)
+- Runtime backend switching without YAML changes (dev uses pass, prod uses AWS)  
+- Polyglot environments preferring HTTP over K8s client libraries
+- Running outside Kubernetes (VMs, CI, local dev with same API)
 
 ### Can I use this outside Kubernetes?
 
