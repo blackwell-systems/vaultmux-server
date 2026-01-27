@@ -22,9 +22,9 @@ By running vaultmux-server as a sidecar:
 This gives you **hard isolation at the cloud boundary**, not just "best effort" isolation inside Kubernetes.
 
 **The trust model:**
-- ❌ Don't trust: Kubernetes RBAC (can be misconfigured)
-- ❌ Don't trust: Network policies (can have holes)
-- ✅ Trust: Cloud provider IAM (enforced at API level, outside cluster)
+- Don't trust: Kubernetes RBAC (can be misconfigured)
+- Don't trust: Network policies (can have holes)
+- Trust: Cloud provider IAM (enforced at API level, outside cluster)
 
 ---
 
