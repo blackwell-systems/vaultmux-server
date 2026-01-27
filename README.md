@@ -4,7 +4,9 @@
 
 [![Blackwell Systems™](https://raw.githubusercontent.com/blackwell-systems/blackwell-docs-theme/main/badge-trademark.svg)](https://github.com/blackwell-systems)
 [![Go Reference](https://pkg.go.dev/badge/github.com/blackwell-systems/vaultmux-server.svg)](https://pkg.go.dev/github.com/blackwell-systems/vaultmux-server)
-[![Go Version](https://img.shields.io/badge/go-1.23+-blue.svg)](https://go.dev/)
+[![Go Version](https://img.shields.io/badge/go-1.24+-blue.svg)](https://go.dev/)
+[![Kubernetes](https://img.shields.io/badge/Kubernetes-326CE5?logo=kubernetes&logoColor=white)](https://kubernetes.io/)
+[![Docker](https://img.shields.io/badge/Docker-2496ED?logo=docker&logoColor=white)](https://hub.docker.com/)
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](LICENSE-APACHE)
 
 **Language-agnostic secret management for polyglot Kubernetes environments.** Deploy as sidecar or cluster service. Supports AWS Secrets Manager, GCP Secret Manager, and Azure Key Vault with zero client SDK dependencies.
