@@ -432,10 +432,27 @@ See [helm/vaultmux-server/](helm/vaultmux-server/) for full chart documentation.
 - Use Kubernetes NetworkPolicies to restrict pod-to-pod access
 - Consider service mesh (Istio, Linkerd) for mTLS between pods
 
-### Authentication
-- No built-in authentication (relies on network isolation)
-- Backend credentials use IAM roles (AWS), Workload Identity (GCP), Managed Identity (Azure)
-- Never store cloud credentials in pods—use native identity mechanisms
+### Authentication & Authorization
+
+**Sidecar Pattern (Recommended for Multi-Tenant):**
+
+Namespace isolation via Kubernetes service accounts + cloud IAM:
+- Each namespace has its own vaultmux-server pod
+- Different Kubernetes service account per namespace
+- Cloud provider maps service account → IAM identity
+  - AWS: IAM Roles for Service Accounts (IRSA)
+  - GCP: Workload Identity
+  - Azure: Managed Identity
+- `test` namespace → `test` IAM role → `test/*` secrets only
+- `prod` namespace → `prod` IAM role → `prod/*` secrets only
+
+Cloud provider enforces the authorization boundary. No HTTP-level RBAC needed.
+
+**Cluster Service Pattern:**
+
+Currently relies on network isolation (any pod in cluster can call API). For multi-tenant isolation without IAM, HTTP-level RBAC is on the roadmap (authenticate Kubernetes service account tokens, authorize based on namespace).
+
+Use sidecar pattern if you need namespace isolation today.
 
 ### Secrets in Transit
 - Sidecar: localhost traffic (no TLS needed)
