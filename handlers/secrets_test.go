@@ -22,7 +22,7 @@ func TestCreateSecretRequest(t *testing.T) {
 		Name:  "test-secret",
 		Value: "test-value",
 	}
-	
+
 	if req.Name != "test-secret" {
 		t.Errorf("Expected name 'test-secret', got %s", req.Name)
 	}
@@ -35,7 +35,7 @@ func TestUpdateSecretRequest(t *testing.T) {
 	req := UpdateSecretRequest{
 		Value: "new-value",
 	}
-	
+
 	if req.Value != "new-value" {
 		t.Errorf("Expected value 'new-value', got %s", req.Value)
 	}
@@ -46,7 +46,7 @@ func TestSecretResponse(t *testing.T) {
 		Name:  "test",
 		Value: "value",
 	}
-	
+
 	if resp.Name != "test" {
 		t.Errorf("Expected name 'test', got %s", resp.Name)
 	}
@@ -59,7 +59,7 @@ func TestListSecretsResponse(t *testing.T) {
 	resp := ListSecretsResponse{
 		Secrets: []string{"secret1", "secret2"},
 	}
-	
+
 	if len(resp.Secrets) != 2 {
 		t.Errorf("Expected 2 secrets, got %d", len(resp.Secrets))
 	}

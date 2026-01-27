@@ -54,7 +54,7 @@ func (h *SecretHandler) ListSecrets(c *gin.Context) {
 
 func (h *SecretHandler) GetSecret(c *gin.Context) {
 	name := c.Param("name")
-	
+
 	value, err := h.backend.GetNotes(c.Request.Context(), name, h.session)
 	if err != nil {
 		if err == vaultmux.ErrNotFound {
@@ -98,7 +98,7 @@ func (h *SecretHandler) CreateSecret(c *gin.Context) {
 
 func (h *SecretHandler) UpdateSecret(c *gin.Context) {
 	name := c.Param("name")
-	
+
 	var req UpdateSecretRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})

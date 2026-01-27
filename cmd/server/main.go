@@ -29,32 +29,32 @@ import (
 	"time"
 
 	"github.com/blackwell-systems/vaultmux"
+	"github.com/blackwell-systems/vaultmux-server/handlers"
+	"github.com/blackwell-systems/vaultmux-server/middleware"
 	_ "github.com/blackwell-systems/vaultmux/backends/awssecrets"
 	_ "github.com/blackwell-systems/vaultmux/backends/azurekeyvault"
 	_ "github.com/blackwell-systems/vaultmux/backends/gcpsecrets"
-	"github.com/blackwell-systems/vaultmux-server/handlers"
-	"github.com/blackwell-systems/vaultmux-server/middleware"
 	"github.com/gin-gonic/gin"
 )
 
 func main() {
 	port := getEnv("PORT", "8080")
 	backendType := getEnv("VAULTMUX_BACKEND", "")
-	
+
 	if backendType == "" {
 		log.Fatal("VAULTMUX_BACKEND environment variable is required (aws, gcp, or azure)")
 	}
-	
+
 	supportedBackends := map[string]bool{
-		"awssecrets":   true,
-		"gcpsecrets":   true,
+		"awssecrets":    true,
+		"gcpsecrets":    true,
 		"azurekeyvault": true,
 	}
-	
+
 	if !supportedBackends[backendType] {
 		log.Fatalf("Unsupported backend: %s. vaultmux-server supports: awssecrets, gcpsecrets, azurekeyvault. For other backends (pass, bitwarden, 1password), use the vaultmux library directly.", backendType)
 	}
-	
+
 	backend, err := vaultmux.New(vaultmux.Config{
 		Backend: vaultmux.BackendType(backendType),
 		Prefix:  getEnv("VAULTMUX_PREFIX", "vaultmux"),
@@ -119,7 +119,7 @@ func main() {
 	log.Println("Shutting down server...")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	
+
 	if err := srv.Shutdown(ctx); err != nil {
 		log.Fatalf("Server forced to shutdown: %v", err)
 	}
@@ -136,7 +136,7 @@ func getEnv(key, defaultValue string) string {
 
 func getBackendOptions() map[string]string {
 	opts := make(map[string]string)
-	
+
 	if region := os.Getenv("AWS_REGION"); region != "" {
 		opts["region"] = region
 	}
@@ -146,6 +146,6 @@ func getBackendOptions() map[string]string {
 	if projectID := os.Getenv("GCP_PROJECT_ID"); projectID != "" {
 		opts["project_id"] = projectID
 	}
-	
+
 	return opts
 }
