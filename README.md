@@ -448,6 +448,8 @@ Namespace isolation via Kubernetes service accounts + cloud IAM:
 
 Cloud provider enforces the authorization boundary. No HTTP-level RBAC needed.
 
+**[📖 Complete sidecar setup guide](docs/SIDECAR_RBAC.md)** - Step-by-step instructions for AWS IRSA, GCP Workload Identity, and Azure Managed Identity.
+
 **Cluster Service Pattern:**
 
 Currently relies on network isolation (any pod in cluster can call API). For multi-tenant isolation without IAM, HTTP-level RBAC is on the roadmap (authenticate Kubernetes service account tokens, authorize based on namespace).
