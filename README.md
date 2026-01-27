@@ -604,6 +604,28 @@ Not currently. Each request hits the backend. Future versions may add caching wi
 
 Secret rotation happens at the backend level (AWS Secrets Manager rotation, Bitwarden sync). vaultmux-server always fetches the latest version.
 
+### Why not just use Kubernetes Secrets?
+
+You absolutely can, and many teams do. Kubernetes Secrets are valid and often the simplest solution, especially early on.
+
+The trade-off is that your cluster becomes part of your secret system of record. All secrets live in etcd, so even if encrypted at rest, you're now depending on:
+- etcd security
+- Cluster access controls  
+- Backup/restore policies
+
+At small scale, that's usually fine. At larger scale or in higher-security setups, some teams get uncomfortable because:
+- You have two sources of truth (cloud vault + K8s Secrets) with a sync loop
+- Secret lifecycle becomes tied to cluster lifecycle (backups, restores, migrations)
+- Blast radius increases: anyone with sufficient cluster access can potentially reach secrets
+
+**It's not that Kubernetes Secrets are "bad" - they're just a different model:**
+
+**Kubernetes Secrets model:** Cluster is compute + secret storage
+
+**Runtime vault model (vaultmux-server):** Cluster is just compute, secrets stay in the vault
+
+Choose based on your security requirements and operational preferences.
+
 ---
 
 ## Roadmap
