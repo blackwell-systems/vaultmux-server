@@ -4,6 +4,39 @@ This document outlines planned features and improvements for vaultmux-server. It
 
 ## v0.2.0 (Next Release)
 
+### Planned
+
+**Native Sidecar Support (Kubernetes 1.28+)**
+- Update deployment examples to use init containers with `restartPolicy: Always`
+- Prevents sidecars from holding Job workloads open after main container exits
+- Backward compatible with standard sidecar pattern for older K8s versions
+
+**Status:** High priority - solves real Job workload issues
+
+**Why:** K8s 1.28 native sidecars ensure sidecar lifecycle is properly managed, especially for batch workloads where the main container exits after completion.
+
+**Estimated effort:** 1 week (update examples, docs, Helm chart)
+
+**Dependencies:** Kubernetes 1.28+
+
+---
+
+**Unix Domain Socket Support**
+- Alternative to localhost HTTP for sidecar-to-app communication
+- Use shared emptyDir volume mount for socket file
+- Enhanced security (no localhost network exposure)
+- Configurable fallback to HTTP for compatibility
+
+**Status:** Medium priority - security enhancement
+
+**Why:** Eliminates localhost network exposure for maximum sidecar isolation. Apps mount shared volume and connect via UDS instead of HTTP.
+
+**Estimated effort:** 2 weeks (socket listener, volume mount examples, docs)
+
+**Dependencies:** Shared volume mount between containers
+
+---
+
 ### Under Consideration
 
 **HTTP-Level RBAC for Cluster Service Pattern**
@@ -87,4 +120,4 @@ Have a feature request or want to contribute? Open an issue describing your use 
 
 ---
 
-**Last updated:** 2026-01-27
+**Last updated:** 2026-01-28
