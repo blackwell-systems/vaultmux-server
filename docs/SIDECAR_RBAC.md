@@ -566,7 +566,48 @@ kubectl get pod -n test -l aadpodidbinding=test-vaultmux
 
 ## Best Practices
 
-### 1. Principle of Least Privilege
+### 1. Block Pod Exec in Production
+
+Prevent `kubectl exec` into vaultmux-server pods to reduce attack surface:
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: read-only-pods
+  namespace: prod
+rules:
+- apiGroups: [""]
+  resources: ["pods", "pods/log"]
+  verbs: ["get", "list", "watch"]
+# Explicitly NO pods/exec or pods/attach
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: developers-read-only
+  namespace: prod
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: read-only-pods
+subjects:
+- kind: Group
+  name: developers
+  apiGroup: rbac.authorization.k8s.io
+```
+
+**Why:** Even though vaultmux-server uses distroless images (no shell), blocking exec removes an entire attack vector. If credentials are compromised, attackers cannot shell into pods.
+
+**Audit existing roles:**
+```bash
+# Find dangerous wildcards
+kubectl get roles,clusterroles -A -o yaml | grep -E "verbs:.*\*|resources:.*\*"
+```
+
+Watch for `verbs: ["*"]` or `resources: ["*"]` - these grant exec access.
+
+### 2. Principle of Least Privilege
 
 Grant only the minimum permissions needed:
 ```json

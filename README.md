@@ -63,6 +63,8 @@ Use Kubernetes Secrets if you want declarative management and are comfortable wi
 
 **Best for:** Per-app secret isolation, different backends per namespace, minimal latency.
 
+**Native Sidecar (Kubernetes 1.28+):**
+
 ```yaml
 apiVersion: apps/v1
 kind: Deployment
@@ -71,6 +73,23 @@ metadata:
 spec:
   template:
     spec:
+      initContainers:
+      # vaultmux-server as native sidecar
+      - name: vaultmux
+        image: ghcr.io/blackwell-systems/vaultmux-server:latest
+        restartPolicy: Always  # Native sidecar - auto-terminates with main container
+        ports:
+        - containerPort: 8080
+        env:
+        - name: VAULTMUX_BACKEND
+          value: "awssecrets"
+        - name: AWS_REGION
+          value: "us-east-1"
+        resources:
+          limits:
+            cpu: 100m
+            memory: 128Mi
+      
       containers:
       # Your application
       - name: app
@@ -78,22 +97,14 @@ spec:
         env:
         - name: VAULTMUX_ENDPOINT
           value: "http://localhost:8080"
-      
-      # vaultmux-server sidecar
-      - name: vaultmux
-        image: ghcr.io/blackwell-systems/vaultmux-server:latest
-        ports:
-        - containerPort: 8080
-        env:
-        - name: VAULTMUX_BACKEND
-          value: "aws"
-        - name: AWS_REGION
-          value: "us-east-1"
-        resources:
-          limits:
-            cpu: 100m
-            memory: 128Mi
 ```
+
+**Key benefits:**
+- Properly terminates when main container exits (critical for Job/CronJob workloads)
+- Guaranteed startup order (sidecar ready before app starts)
+- Auto-restart on failure
+
+**Legacy pattern (Kubernetes < 1.28):** See [examples/sidecar/deployment.yaml](examples/sidecar/deployment.yaml)
 
 **Your app fetches secrets:**
 
@@ -118,7 +129,7 @@ var secret struct{ Value string }
 json.NewDecoder(resp.Body).Decode(&secret)
 ```
 
-See [examples/sidecar/](examples/sidecar/) for complete manifests.
+See [examples/sidecar/](examples/sidecar/) for complete manifests and legacy pattern examples.
 
 ---
 
@@ -143,7 +154,7 @@ spec:
         image: ghcr.io/blackwell-systems/vaultmux-server:latest
         env:
         - name: VAULTMUX_BACKEND
-          value: "gcp"
+          value: "gcpsecrets"
         - name: GCP_PROJECT_ID
           value: "my-project"
 ---
@@ -186,7 +197,7 @@ kind: ConfigMap
 metadata:
   name: vaultmux-config
 data:
-  backend: "aws"  # Change to "gcp" without redeploying apps
+  backend: "awssecrets"  # Change to "gcpsecrets" without redeploying apps
   region: "us-east-1"
 ```
 
@@ -200,11 +211,11 @@ data:
 
 ```yaml
 # staging namespace - uses AWS
-VAULTMUX_BACKEND: aws
+VAULTMUX_BACKEND: awssecrets
 AWS_REGION: us-east-1
 
 # production namespace - uses GCP
-VAULTMUX_BACKEND: gcp
+VAULTMUX_BACKEND: gcpsecrets
 GCP_PROJECT_ID: prod-project-123
 ```
 
@@ -229,7 +240,7 @@ services:
   vaultmux:
     image: ghcr.io/blackwell-systems/vaultmux-server:latest
     env:
-      VAULTMUX_BACKEND: aws
+      VAULTMUX_BACKEND: awssecrets
       AWS_REGION: us-east-1
       AWS_ENDPOINT: http://localstack:4566
     ports:
@@ -342,11 +353,11 @@ GET /health
 
 ## Supported Backends
 
-| Backend | Environment Variables | Use Case |
-|---------|----------------------|----------|
-| **AWS Secrets Manager** | `AWS_REGION`, `AWS_ENDPOINT` | Production (AWS EKS) |
-| **GCP Secret Manager** | `GCP_PROJECT_ID` | Production (GCP GKE) |
-| **Azure Key Vault** | Azure SDK env vars | Production (Azure AKS) |
+| Backend | Backend Type | Environment Variables | Use Case |
+|---------|--------------|----------------------|----------|
+| **AWS Secrets Manager** | `awssecrets` | `AWS_REGION`, `AWS_ENDPOINT` | Production (AWS EKS) |
+| **GCP Secret Manager** | `gcpsecrets` | `GCP_PROJECT_ID` | Production (GCP GKE) |
+| **Azure Key Vault** | `azurekeyvault` | Azure SDK env vars | Production (Azure AKS) |
 
 **For CI/CD testing:** Use emulators ([LocalStack](https://localstack.cloud/) for AWS, [GCP Secret Manager Emulator](https://github.com/blackwell-systems/gcp-secret-manager-emulator) for GCP) with endpoint overrides (`AWS_ENDPOINT`, etc).
 
@@ -361,7 +372,7 @@ GET /health
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PORT` | `8080` | HTTP server port |
-| `VAULTMUX_BACKEND` | - | Backend type: `aws`, `gcp`, `azure` (required) |
+| `VAULTMUX_BACKEND` | - | Backend type: `awssecrets`, `gcpsecrets`, `azurekeyvault` (required) |
 | `VAULTMUX_PREFIX` | `vaultmux` | Secret name prefix |
 | `AWS_REGION` | - | AWS region (required for AWS backend) |
 | `AWS_ENDPOINT` | - | AWS endpoint override (for LocalStack/emulators) |
@@ -377,12 +388,18 @@ helm repo add blackwell-systems https://blackwell-systems.github.io/charts
 
 # Deploy as shared service
 helm install vaultmux blackwell-systems/vaultmux-server \
-  --set backend.type=aws \
+  --set backend.type=awssecrets \
   --set aws.region=us-east-1
 
-# Deploy with sidecar injection
+# Deploy with sidecar injection (native sidecar for K8s 1.28+)
 helm install vaultmux blackwell-systems/vaultmux-server \
-  --set sidecar.enabled=true
+  --set sidecar.enabled=true \
+  --set sidecar.nativeSidecar=true
+
+# For K8s < 1.28, use legacy sidecar pattern
+helm install vaultmux blackwell-systems/vaultmux-server \
+  --set sidecar.enabled=true \
+  --set sidecar.nativeSidecar=false
 ```
 
 **Custom values:**
@@ -392,11 +409,15 @@ helm install vaultmux blackwell-systems/vaultmux-server \
 replicaCount: 3
 
 backend:
-  type: gcp
+  type: gcpsecrets
   prefix: myapp
 
 gcp:
   projectId: prod-project-123
+
+sidecar:
+  enabled: true
+  nativeSidecar: true  # Use native sidecar pattern (K8s 1.28+)
 
 resources:
   limits:
@@ -514,13 +535,13 @@ Use sidecar pattern if you need namespace isolation today.
 go install github.com/blackwell-systems/vaultmux-server/cmd/server@latest
 
 # Run with AWS (using LocalStack for local testing)
-VAULTMUX_BACKEND=aws \
+VAULTMUX_BACKEND=awssecrets \
   AWS_REGION=us-east-1 \
   AWS_ENDPOINT=http://localhost:4566 \
   server
 
 # Run with GCP Secret Manager
-VAULTMUX_BACKEND=gcp \
+VAULTMUX_BACKEND=gcpsecrets \
   GCP_PROJECT_ID=my-project \
   server
 ```
@@ -547,7 +568,7 @@ docker build -t vaultmux-server:latest .
 
 # Run with LocalStack
 docker run -p 8080:8080 \
-  -e VAULTMUX_BACKEND=aws \
+  -e VAULTMUX_BACKEND=awssecrets \
   -e AWS_REGION=us-east-1 \
   -e AWS_ENDPOINT=http://localstack:4566 \
   vaultmux-server:latest

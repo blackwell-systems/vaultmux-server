@@ -1,0 +1,130 @@
+{{- if .Values.sidecar.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "vaultmux-server.fullname" . }}-sidecar
+  labels:
+    {{- include "vaultmux-server.labels" . | nindent 4 }}
+data:
+  sidecar-container.yaml: |
+    {{- if .Values.sidecar.nativeSidecar }}
+    # Native sidecar pattern for Kubernetes 1.28+
+    # Add to spec.initContainers with restartPolicy: Always
+    - name: vaultmux-server
+      image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+      imagePullPolicy: {{ .Values.image.pullPolicy }}
+      restartPolicy: Always
+      ports:
+      - name: http
+        containerPort: 8080
+        protocol: TCP
+      env:
+      - name: PORT
+        value: "8080"
+      - name: VAULTMUX_BACKEND
+        value: {{ .Values.backend.type | quote }}
+      - name: VAULTMUX_PREFIX
+        value: {{ .Values.backend.prefix | quote }}
+      {{- if eq .Values.backend.type "awssecrets" }}
+      - name: AWS_REGION
+        value: {{ .Values.aws.region | quote }}
+      {{- if .Values.aws.endpoint }}
+      - name: AWS_ENDPOINT
+        value: {{ .Values.aws.endpoint | quote }}
+      {{- end }}
+      {{- end }}
+      {{- if eq .Values.backend.type "gcpsecrets" }}
+      - name: GCP_PROJECT_ID
+        value: {{ .Values.gcp.projectId | quote }}
+      {{- end }}
+      livenessProbe:
+        httpGet:
+          path: /health
+          port: http
+        initialDelaySeconds: 10
+        periodSeconds: 10
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: http
+        initialDelaySeconds: 5
+        periodSeconds: 5
+      resources:
+        {{- toYaml .Values.resources | nindent 8 }}
+    {{- else }}
+    # Legacy sidecar pattern for Kubernetes < 1.28
+    # Add to spec.containers
+    - name: vaultmux-server
+      image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+      imagePullPolicy: {{ .Values.image.pullPolicy }}
+      ports:
+      - name: http
+        containerPort: 8080
+        protocol: TCP
+      env:
+      - name: PORT
+        value: "8080"
+      - name: VAULTMUX_BACKEND
+        value: {{ .Values.backend.type | quote }}
+      - name: VAULTMUX_PREFIX
+        value: {{ .Values.backend.prefix | quote }}
+      {{- if eq .Values.backend.type "awssecrets" }}
+      - name: AWS_REGION
+        value: {{ .Values.aws.region | quote }}
+      {{- if .Values.aws.endpoint }}
+      - name: AWS_ENDPOINT
+        value: {{ .Values.aws.endpoint | quote }}
+      {{- end }}
+      {{- end }}
+      {{- if eq .Values.backend.type "gcpsecrets" }}
+      - name: GCP_PROJECT_ID
+        value: {{ .Values.gcp.projectId | quote }}
+      {{- end }}
+      livenessProbe:
+        httpGet:
+          path: /health
+          port: http
+        initialDelaySeconds: 10
+        periodSeconds: 10
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: http
+        initialDelaySeconds: 5
+        periodSeconds: 5
+      resources:
+        {{- toYaml .Values.resources | nindent 8 }}
+    {{- end }}
+
+  usage.txt: |
+    To use vaultmux-server as a sidecar, add the container snippet to your Deployment:
+
+    {{- if .Values.sidecar.nativeSidecar }}
+    Native Sidecar Pattern (Kubernetes 1.28+):
+    
+    spec:
+      initContainers:
+        # Copy from sidecar-container.yaml
+      containers:
+        - name: your-app
+          env:
+          - name: VAULTMUX_ENDPOINT
+            value: "http://localhost:8080"
+    {{- else }}
+    Legacy Sidecar Pattern (Kubernetes < 1.28):
+    
+    spec:
+      containers:
+        - name: your-app
+          env:
+          - name: VAULTMUX_ENDPOINT
+            value: "http://localhost:8080"
+        # Copy from sidecar-container.yaml
+    {{- end }}
+
+    View the full sidecar configuration:
+      kubectl get configmap {{ include "vaultmux-server.fullname" . }}-sidecar -o yaml
+
+    For complete examples, see:
+      https://github.com/blackwell-systems/vaultmux-server/tree/main/examples/sidecar
+{{- end }}
