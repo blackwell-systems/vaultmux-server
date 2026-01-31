@@ -1,0 +1,45 @@
+replicaCount: 1
+
+image:
+  repository: ghcr.io/blackwell-systems/vaultmux-server
+  pullPolicy: IfNotPresent
+  tag: ""
+
+backend:
+  type: awssecrets  # awssecrets, gcpsecrets, or azurekeyvault (required)
+  prefix: vaultmux
+
+aws:
+  region: us-east-1
+  endpoint: ""
+
+gcp:
+  projectId: ""
+
+service:
+  type: ClusterIP
+  port: 8080
+
+sidecar:
+  enabled: false
+  nativeSidecar: true  # Use native sidecar pattern (K8s 1.28+). Set to false for K8s < 1.28
+
+resources:
+  limits:
+    cpu: 100m
+    memory: 128Mi
+  requests:
+    cpu: 50m
+    memory: 64Mi
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 80
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}

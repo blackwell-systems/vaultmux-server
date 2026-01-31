@@ -86,6 +86,6 @@ kind: ConfigMap
 metadata:
   name: vaultmux-config
 data:
-  backend: "aws"
+  backend: "awssecrets"
   prefix: "myapp"
   aws_region: "us-east-1"
