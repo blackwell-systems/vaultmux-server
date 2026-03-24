@@ -54,6 +54,10 @@ func (h *SecretHandler) ListSecrets(c *gin.Context) {
 
 func (h *SecretHandler) GetSecret(c *gin.Context) {
 	name := c.Param("name")
+	if err := validateSecretName(name); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 
 	value, err := h.backend.GetNotes(c.Request.Context(), name, h.session)
 	if err != nil {
@@ -78,6 +82,11 @@ func (h *SecretHandler) CreateSecret(c *gin.Context) {
 		return
 	}
 
+	if err := validateSecretName(req.Name); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
 	exists, err := h.backend.ItemExists(c.Request.Context(), req.Name, h.session)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -98,6 +107,10 @@ func (h *SecretHandler) CreateSecret(c *gin.Context) {
 
 func (h *SecretHandler) UpdateSecret(c *gin.Context) {
 	name := c.Param("name")
+	if err := validateSecretName(name); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 
 	var req UpdateSecretRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -125,6 +138,10 @@ func (h *SecretHandler) UpdateSecret(c *gin.Context) {
 
 func (h *SecretHandler) DeleteSecret(c *gin.Context) {
 	name := c.Param("name")
+	if err := validateSecretName(name); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 
 	exists, err := h.backend.ItemExists(c.Request.Context(), name, h.session)
 	if err != nil {
