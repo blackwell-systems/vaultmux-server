@@ -80,6 +80,8 @@ func main() {
 	r := gin.Default()
 	r.Use(middleware.Logger())
 	r.Use(middleware.Recovery())
+	r.Use(middleware.SecurityHeaders())        // Apply security headers to all routes
+	r.Use(middleware.RateLimitMiddleware(100)) // 100 requests per second global limit
 
 	handler := handlers.NewSecretHandler(backend, session)
 
