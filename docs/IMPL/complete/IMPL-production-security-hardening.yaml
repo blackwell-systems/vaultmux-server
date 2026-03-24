@@ -1,0 +1,841 @@
+completion_date: "2026-03-24"
+title: Production Security Hardening - Top 5 Critical/High Fixes
+feature_slug: production-security-hardening
+verdict: SUITABLE
+suitability_assessment: |
+    This feature addresses the top 5 critical/high security findings from the codebase audit:
+    1. Security dependency vulnerabilities (Go 1.26 stdlib + quic-go)
+    2. Input validation & sanitization (path traversal prevention)
+    3. API rate limiting (DoS prevention)
+    4. Test coverage improvement (2.3% → 80%)
+    5. Security headers (XSS/clickjacking protection)
+
+    Decomposition analysis:
+    - File ownership is cleanly disjoint across 7 agents in 2 waves
+    - Wave 1: 5 parallel agents (dependency updates, validation, rate limiting, security headers, comprehensive tests)
+    - Wave 2: 2 parallel agents (integration wiring + CI workflow updates)
+    - No conflicting file modifications between agents
+    - All interfaces can be defined before implementation
+
+    Investigation requirements: NONE. All issues are well-defined from audit report.
+
+    Interface discoverability: FULL. All cross-agent interfaces are known:
+    - validateSecretName function signature
+    - RateLimitMiddleware function signature
+    - SecurityHeaders middleware signature
+    - Test mock interfaces (match existing vaultmux.Backend)
+
+    Pre-implementation status: All 5 items are TODO (confirmed via audit).
+
+    Parallelization value:
+    - Build/test cycle: 20-30 seconds (go build + test + vet)
+    - Agents own 2-4 files each (good granularity)
+    - Wave 1 has 5 fully independent agents (maximum parallelization benefit)
+    - Task complexity: Mix of simple middleware (2-3 min) and comprehensive tests (15-20 min)
+
+    Estimated times:
+    - Scout phase: ~8 min (dependency mapping, interface contracts, IMPL doc)
+    - Agent execution: ~25 min (7 agents, accounting for parallelism across 2 waves)
+    - Merge & verification: ~4 min
+    Total SAW time: ~37 min
+
+    Sequential baseline: ~65 min (7 agents × 9 min avg sequential time)
+    Time savings: ~28 min (43% faster)
+
+    Recommendation: Clear speedup. Wave 1 parallelization (5 agents) provides significant benefit.
+test_command: go test -v -race -coverprofile=coverage.txt -covermode=atomic ./...
+lint_command: go vet ./...
+file_ownership:
+    - file: go.mod
+      agent: A
+      wave: 1
+      action: modify
+    - file: go.sum
+      agent: A
+      wave: 1
+      action: modify
+    - file: handlers/secrets.go
+      agent: B
+      wave: 1
+      action: modify
+    - file: handlers/validation.go
+      agent: B
+      wave: 1
+      action: new
+    - file: handlers/validation_test.go
+      agent: B
+      wave: 1
+      action: new
+    - file: middleware/ratelimit.go
+      agent: C
+      wave: 1
+      action: new
+    - file: middleware/ratelimit_test.go
+      agent: C
+      wave: 1
+      action: new
+    - file: middleware/security.go
+      agent: D
+      wave: 1
+      action: new
+    - file: middleware/security_test.go
+      agent: D
+      wave: 1
+      action: new
+    - file: handlers/secrets_integration_test.go
+      agent: E
+      wave: 1
+      action: new
+    - file: handlers/testutil.go
+      agent: E
+      wave: 1
+      action: new
+    - file: cmd/server/main.go
+      agent: F
+      wave: 2
+      action: modify
+      depends_on:
+        - A
+        - B
+        - C
+        - D
+    - file: .github/workflows/ci.yml
+      agent: G
+      wave: 2
+      action: modify
+      depends_on:
+        - A
+    - file: .github/workflows/release.yml
+      agent: G
+      wave: 2
+      action: modify
+      depends_on:
+        - A
+interface_contracts:
+    - name: validateSecretName
+      description: Validates secret name to prevent path traversal and ensure format compliance. Called from handlers/secrets.go in GetSecret, CreateSecret, UpdateSecret, DeleteSecret handlers.
+      definition: |
+        // validateSecretName checks if a secret name is valid and safe to use.
+        // Returns error if name is empty, too long, contains path traversal patterns,
+        // or includes invalid characters.
+        func validateSecretName(name string) error
+
+        Rules:
+        - Name length: 1-255 characters
+        - Allowed characters: alphanumeric, hyphens, underscores (regex: ^[a-zA-Z0-9_-]+$)
+        - Reject: empty strings, "..", "/", "\\"
+        - Error messages: descriptive for each failure case
+      location: handlers/validation.go
+    - name: RateLimitMiddleware
+      description: Gin middleware for request rate limiting using token bucket algorithm. Integrated in cmd/server/main.go via r.Use(middleware.RateLimitMiddleware(100)).
+      definition: |
+        // RateLimitMiddleware creates a Gin middleware that limits requests per second.
+        // Uses golang.org/x/time/rate for token bucket rate limiting.
+        // Returns HTTP 429 (Too Many Requests) when rate limit is exceeded.
+        func RateLimitMiddleware(rps int) gin.HandlerFunc
+
+        Parameters:
+        - rps: requests per second (bucket size = rps * 2)
+
+        Response on limit exceeded:
+        - Status: 429 Too Many Requests
+        - Body: {"error": "rate limit exceeded"}
+      location: middleware/ratelimit.go
+    - name: SecurityHeaders
+      description: Gin middleware for setting security HTTP headers. Integrated in cmd/server/main.go via r.Use(middleware.SecurityHeaders()).
+      definition: |
+        // SecurityHeaders creates a Gin middleware that sets standard security headers
+        // to protect against XSS, clickjacking, MIME sniffing, and protocol downgrade attacks.
+        func SecurityHeaders() gin.HandlerFunc
+
+        Headers set:
+        - X-Content-Type-Options: nosniff
+        - X-Frame-Options: DENY
+        - X-XSS-Protection: 1; mode=block
+        - Strict-Transport-Security: max-age=31536000; includeSubDomains
+        - Content-Security-Policy: default-src 'none'; frame-ancestors 'none'
+      location: middleware/security.go
+    - name: MockBackend
+      description: Test mock implementation of vaultmux.Backend interface for handler testing
+      definition: |
+        // MockBackend implements vaultmux.Backend interface for testing.
+        // Uses in-memory map for secret storage.
+        type MockBackend struct {
+            items   map[string]string
+            listErr error
+            getErr  error
+            createErr error
+            updateErr error
+            deleteErr error
+        }
+
+        Methods (must match vaultmux.Backend interface):
+        - ListItems(ctx context.Context, session vaultmux.Session) ([]*vaultmux.Item, error)
+        - GetNotes(ctx context.Context, name string, session vaultmux.Session) (string, error)
+        - CreateItem(ctx context.Context, name, value string, session vaultmux.Session) error
+        - UpdateItem(ctx context.Context, name, value string, session vaultmux.Session) error
+        - DeleteItem(ctx context.Context, name string, session vaultmux.Session) error
+        - ItemExists(ctx context.Context, name string, session vaultmux.Session) (bool, error)
+        - Init(ctx context.Context) error
+        - Authenticate(ctx context.Context) (vaultmux.Session, error)
+        - Close() error
+      location: handlers/testutil.go
+waves:
+    - number: 1
+      agents:
+        - id: A
+          task: |
+            # Agent A - Dependency Security Updates
+
+            ## What to Implement
+            Update Go dependencies to patch 5 critical/high security vulnerabilities:
+            1. Go standard library: Update from Go 1.24.0 to Go 1.26.1 (fixes 4 CVEs: GO-2026-4603, GO-2026-4601, GO-2026-4600, GO-2026-4599)
+            2. quic-go dependency: Update from v0.54.0 to v0.57.0 (fixes GO-2025-4233 HTTP/3 QPACK DoS vulnerability)
+
+            ## Files to Modify
+            - go.mod: Update go directive to 1.26.1
+            - go.sum: Will be regenerated automatically
+
+            ## Implementation Steps
+            1. Update go.mod go directive from "go 1.24.0" to "go 1.26.1"
+            2. Run: go get github.com/quic-go/quic-go@v0.57.0
+            3. Run: go mod tidy
+            4. Run: go mod verify (ensure no corruption)
+            5. Verify all indirect dependencies are updated correctly
+
+            ## Tests
+            - Run full test suite: go test -v ./...
+            - Verify build succeeds: go build -v ./...
+            - Check for any breaking changes in transitive dependencies
+
+            ## Verification Gate
+            ```bash
+            gofmt -l . && go build -v ./... && go vet ./... && go test -v -race ./...
+            ```
+
+            ## Constraints
+            - Do NOT modify any other files (CI workflows updated by Agent G in Wave 2)
+            - Ensure go.sum is properly regenerated (do not hand-edit)
+            - If dependency conflicts arise, resolve by finding compatible versions
+            - Document any breaking API changes from dependency updates in commit message
+          files:
+            - go.mod
+            - go.sum
+        - id: B
+          task: |
+            # Agent B - Input Validation & Path Traversal Prevention
+
+            ## What to Implement
+            Add comprehensive input validation for secret names to prevent path traversal attacks and ensure format compliance.
+
+            ## Files to Create/Modify
+            - handlers/validation.go (new): validation logic
+            - handlers/validation_test.go (new): comprehensive validation tests
+            - handlers/secrets.go (modify): integrate validation into all handlers
+
+            ## Interface Contract
+            ```go
+            // handlers/validation.go
+            func validateSecretName(name string) error
+            ```
+
+            ## Implementation Requirements
+
+            ### handlers/validation.go
+            Implement validateSecretName function with these rules:
+            1. Length validation: 1-255 characters
+            2. Reject empty strings
+            3. Reject path traversal patterns: "..", "/", "\\"
+            4. Character whitelist: ^[a-zA-Z0-9_-]+$ (alphanumeric, hyphens, underscores only)
+            5. Return descriptive errors for each failure case
+
+            ### handlers/validation_test.go
+            Table-driven tests covering:
+            - Valid names: "my-secret", "secret_123", "MySecret", "a", "a" + strings.Repeat("b", 253)
+            - Invalid empty: ""
+            - Invalid length: strings.Repeat("a", 256)
+            - Invalid path traversal: "../etc/passwd", "../../secret", "foo/../bar", "foo\\bar"
+            - Invalid characters: "my secret" (space), "my/secret", "secret@123", "secret#123"
+            - Edge cases: "-", "_", "123", "---___123___---"
+
+            ### handlers/secrets.go
+            Integrate validation into handlers at lines 56, 100, 127:
+            ```go
+            name := c.Param("name")
+            if err := validateSecretName(name); err != nil {
+                c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+                return
+            }
+            ```
+
+            Also validate CreateSecretRequest.Name in CreateSecret handler after ShouldBindJSON.
+
+            ## Tests
+            - Run validation_test.go: 100% coverage required
+            - Run secrets_test.go: ensure no regressions
+            - Manually test with curl: valid names pass, invalid names return 400
+
+            ## Verification Gate
+            ```bash
+            gofmt -l . && go build -v ./... && go vet ./... && go test -v -race ./handlers
+            ```
+
+            ## Constraints
+            - Do NOT modify middleware package or cmd/server/main.go
+            - Use regexp.MatchString for character validation
+            - Error messages must be user-friendly (no stack traces)
+            - Validation must execute before any backend calls
+          files:
+            - handlers/secrets.go
+            - handlers/validation.go
+            - handlers/validation_test.go
+        - id: C
+          task: |
+            # Agent C - Rate Limiting Middleware
+
+            ## What to Implement
+            Create rate limiting middleware using token bucket algorithm to prevent DoS and brute force attacks.
+
+            ## Files to Create
+            - middleware/ratelimit.go: rate limiting middleware implementation
+            - middleware/ratelimit_test.go: comprehensive middleware tests
+
+            ## Interface Contract
+            ```go
+            // middleware/ratelimit.go
+            func RateLimitMiddleware(rps int) gin.HandlerFunc
+            ```
+
+            ## Implementation Requirements
+
+            ### middleware/ratelimit.go
+            ```go
+            package middleware
+
+            import (
+                "net/http"
+                "golang.org/x/time/rate"
+                "github.com/gin-gonic/gin"
+            )
+
+            func RateLimitMiddleware(rps int) gin.HandlerFunc {
+                limiter := rate.NewLimiter(rate.Limit(rps), rps*2)
+                return func(c *gin.Context) {
+                    if !limiter.Allow() {
+                        c.JSON(http.StatusTooManyRequests, gin.H{"error": "rate limit exceeded"})
+                        c.Abort()
+                        return
+                    }
+                    c.Next()
+                }
+            }
+            ```
+
+            Implementation details:
+            - Use golang.org/x/time/rate package (already in dependencies via transitive deps)
+            - Token bucket capacity: rps * 2 (allows short bursts)
+            - Response: 429 Too Many Requests with JSON error
+            - Must call c.Abort() to stop handler chain
+
+            ### middleware/ratelimit_test.go
+            Test cases:
+            1. Test rate limit not exceeded: send rps-1 requests rapidly, all succeed
+            2. Test rate limit exceeded: send rps+10 requests rapidly, verify 429 responses
+            3. Test burst handling: verify bucket size allows 2*rps burst
+            4. Test recovery: wait for bucket refill, verify requests succeed again
+            5. Test multiple concurrent requests: use goroutines to simulate parallel load
+
+            Use httptest.NewRecorder and gin test context for testing.
+
+            ## Tests
+            - Run ratelimit_test.go: 100% coverage required
+            - Verify middleware correctly blocks excessive requests
+            - Test with different rps values (1, 10, 100)
+
+            ## Verification Gate
+            ```bash
+            gofmt -l . && go build -v ./... && go vet ./... && go test -v -race ./middleware
+            ```
+
+            ## Constraints
+            - Do NOT modify cmd/server/main.go (integration by Agent F in Wave 2)
+            - Do NOT add new dependencies (use existing golang.org/x/time/rate)
+            - Rate limiter must be global (not per-IP) for simplicity
+            - Must be thread-safe (rate.Limiter is thread-safe by design)
+          files:
+            - middleware/ratelimit.go
+            - middleware/ratelimit_test.go
+        - id: D
+          task: |
+            # Agent D - Security Headers Middleware
+
+            ## What to Implement
+            Create middleware that sets standard security HTTP headers to protect against XSS, clickjacking, MIME sniffing, and protocol downgrade attacks.
+
+            ## Files to Create
+            - middleware/security.go: security headers middleware
+            - middleware/security_test.go: middleware tests
+
+            ## Interface Contract
+            ```go
+            // middleware/security.go
+            func SecurityHeaders() gin.HandlerFunc
+            ```
+
+            ## Implementation Requirements
+
+            ### middleware/security.go
+            ```go
+            package middleware
+
+            import "github.com/gin-gonic/gin"
+
+            func SecurityHeaders() gin.HandlerFunc {
+                return func(c *gin.Context) {
+                    // Prevent MIME sniffing
+                    c.Header("X-Content-Type-Options", "nosniff")
+
+                    // Prevent clickjacking
+                    c.Header("X-Frame-Options", "DENY")
+
+                    // XSS protection (legacy browsers)
+                    c.Header("X-XSS-Protection", "1; mode=block")
+
+                    // Force HTTPS (when deployed with TLS)
+                    c.Header("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+
+                    // Content Security Policy (API-only, no resources)
+                    c.Header("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
+
+                    c.Next()
+                }
+            }
+            ```
+
+            Header explanations (document in godoc):
+            - X-Content-Type-Options: prevents browsers from MIME-type sniffing
+            - X-Frame-Options: prevents page from being embedded in iframe (clickjacking)
+            - X-XSS-Protection: enables browser XSS filter (legacy browser support)
+            - Strict-Transport-Security: enforces HTTPS for 1 year (31536000 seconds)
+            - Content-Security-Policy: restricts all resource loading (API doesn't serve HTML/JS)
+
+            ### middleware/security_test.go
+            Test cases:
+            1. Test all headers are set: verify each header exists and has correct value
+            2. Test headers don't interfere with JSON responses
+            3. Test headers are set before handler execution
+            4. Test headers persist through handler chain
+
+            Use gin test mode and httptest.NewRecorder to verify headers.
+
+            ## Tests
+            - Run security_test.go: 100% coverage required
+            - Verify all 5 headers are set with correct values
+            - Test with actual HTTP requests to ensure headers appear in response
+
+            ## Verification Gate
+            ```bash
+            gofmt -l . && go build -v ./... && go vet ./... && go test -v -race ./middleware
+            ```
+
+            ## Constraints
+            - Do NOT modify cmd/server/main.go (integration by Agent F in Wave 2)
+            - Headers must be set before c.Next() is called
+            - CSP must be restrictive (default-src 'none') since this is API-only
+            - Do NOT add permissive CORS headers (out of scope)
+          files:
+            - middleware/security.go
+            - middleware/security_test.go
+        - id: E
+          task: |
+            # Agent E - Comprehensive Test Coverage
+
+            ## What to Implement
+            Create comprehensive integration tests for HTTP handlers to increase coverage from 2.3% to 80%+. Current handlers/secrets.go has 0% test coverage.
+
+            ## Files to Create
+            - handlers/secrets_integration_test.go: integration tests for all 5 handler methods
+            - handlers/testutil.go: mock backend and test utilities
+
+            ## Implementation Requirements
+
+            ### handlers/testutil.go
+            Create MockBackend implementing vaultmux.Backend interface:
+            ```go
+            package handlers
+
+            import (
+                "context"
+                "github.com/blackwell-systems/vaultmux"
+            )
+
+            type MockBackend struct {
+                items   map[string]string
+                listErr error
+                getErr  error
+                createErr error
+                updateErr error
+                deleteErr error
+                existsErr error
+            }
+
+            func NewMockBackend() *MockBackend {
+                return &MockBackend{items: make(map[string]string)}
+            }
+
+            // Implement all vaultmux.Backend methods
+            func (m *MockBackend) ListItems(ctx context.Context, session vaultmux.Session) ([]vaultmux.Item, error)
+            func (m *MockBackend) GetNotes(ctx context.Context, name string, session vaultmux.Session) (string, error)
+            func (m *MockBackend) CreateItem(ctx context.Context, name, value string, session vaultmux.Session) error
+            func (m *MockBackend) UpdateItem(ctx context.Context, name, value string, session vaultmux.Session) error
+            func (m *MockBackend) DeleteItem(ctx context.Context, name string, session vaultmux.Session) error
+            func (m *MockBackend) ItemExists(ctx context.Context, name string, session vaultmux.Session) (bool, error)
+            func (m *MockBackend) Init(ctx context.Context) error { return nil }
+            func (m *MockBackend) Authenticate(ctx context.Context) (vaultmux.Session, error) { return nil, nil }
+            func (m *MockBackend) Close() error { return nil }
+            ```
+
+            Error injection methods for testing error paths:
+            ```go
+            func (m *MockBackend) SetListError(err error) { m.listErr = err }
+            func (m *MockBackend) SetGetError(err error) { m.getErr = err }
+            // ... etc for all operations
+            ```
+
+            ### handlers/secrets_integration_test.go
+            Comprehensive table-driven tests for all handlers:
+
+            **ListSecrets tests:**
+            - Success: empty list, single item, multiple items
+            - Error: backend ListItems fails
+
+            **GetSecret tests:**
+            - Success: existing secret returns name + value
+            - Error: secret not found (404)
+            - Error: backend GetNotes fails (500)
+
+            **CreateSecret tests:**
+            - Success: new secret created (201)
+            - Error: missing name field (400)
+            - Error: missing value field (400)
+            - Error: secret already exists (409)
+            - Error: backend CreateItem fails (500)
+
+            **UpdateSecret tests:**
+            - Success: existing secret updated (200)
+            - Error: missing value field (400)
+            - Error: secret not found (404)
+            - Error: backend UpdateItem fails (500)
+
+            **DeleteSecret tests:**
+            - Success: existing secret deleted (204)
+            - Error: secret not found (404)
+            - Error: backend DeleteItem fails (500)
+
+            Use gin.CreateTestContext and httptest.NewRecorder for all tests.
+            Target: 80%+ coverage for handlers/secrets.go.
+
+            ## Tests
+            - Run secrets_integration_test.go: verify all test cases pass
+            - Run coverage: go test -coverprofile=coverage.txt ./handlers
+            - Verify coverage: go tool cover -func=coverage.txt | grep secrets.go
+            - Target: >80% coverage for handlers/secrets.go
+
+            ## Verification Gate
+            ```bash
+            gofmt -l . && go build -v ./... && go vet ./... && go test -v -race -coverprofile=coverage.txt ./handlers && go tool cover -func=coverage.txt | grep secrets.go | awk '{if ($3 < 80.0) exit 1}'
+            ```
+
+            ## Constraints
+            - Do NOT modify existing test files (secrets_test.go, middleware tests)
+            - Use gin.TestMode for all tests
+            - Mock backend must be fully functional (not just stubs)
+            - Test both success and error paths for every handler
+            - Do NOT test input validation (handled by Agent B)
+          files:
+            - handlers/secrets_integration_test.go
+            - handlers/testutil.go
+      base_commit: bfddfce3ada16f845191354d7e6834ebdcc60b60
+    - number: 2
+      agents:
+        - id: F
+          task: |
+            # Agent F - Middleware Integration
+
+            ## What to Implement
+            Integrate new security middleware (rate limiting, security headers) into main server setup.
+
+            ## Files to Modify
+            - cmd/server/main.go: add middleware to Gin router
+
+            ## Implementation Requirements
+
+            ### cmd/server/main.go
+            Add middleware registrations after line 82 (after existing middleware.Logger() and middleware.Recovery()):
+
+            ```go
+            r := gin.Default()
+            r.Use(middleware.Logger())
+            r.Use(middleware.Recovery())
+
+            // ADD THESE LINES:
+            r.Use(middleware.SecurityHeaders())         // Apply security headers to all routes
+            r.Use(middleware.RateLimitMiddleware(100))  // 100 requests per second global limit
+            ```
+
+            Middleware ordering rationale:
+            1. Logger (first - logs all requests including rate-limited ones)
+            2. Recovery (catch panics)
+            3. SecurityHeaders (apply to all responses)
+            4. RateLimitMiddleware (reject excessive requests before routing)
+            5. Route handlers (execute only if rate limit passed)
+
+            Import additions:
+            - No new imports needed (middleware package already imported)
+
+            Configuration:
+            - Rate limit: 100 RPS (configurable via environment variable in future, hardcode for now)
+            - Apply globally to all routes including /health endpoint
+
+            ## Tests
+            - Run full test suite: go test -v ./...
+            - Manual verification with curl:
+              ```bash
+              # Test security headers
+              curl -i http://localhost:8080/health
+              # Verify headers: X-Content-Type-Options, X-Frame-Options, etc.
+
+              # Test rate limiting (requires rapid requests)
+              for i in {1..200}; do curl -s http://localhost:8080/health & done
+              # Expect some 429 responses
+              ```
+
+            ## Verification Gate
+            ```bash
+            gofmt -l . && go build -v ./... && go vet ./... && go test -v -race ./...
+            ```
+
+            ## Constraints
+            - Do NOT modify middleware package files
+            - Do NOT change existing middleware registration (Logger, Recovery)
+            - Rate limit value (100 RPS) is a reasonable default for production
+            - Middleware order is critical (do not reorder)
+            - Agent B's validation is integrated directly in handlers, not middleware
+          files:
+            - cmd/server/main.go
+          dependencies:
+            - A
+            - B
+            - C
+            - D
+        - id: G
+          task: |
+            # Agent G - CI Workflow Updates
+
+            ## What to Implement
+            Update GitHub Actions CI/CD workflows to use Go 1.26.1 (matching go.mod from Agent A's dependency update).
+
+            ## Files to Modify
+            - .github/workflows/ci.yml: update Go version
+            - .github/workflows/release.yml: update Go version
+
+            ## Implementation Requirements
+
+            ### .github/workflows/ci.yml
+            Update line 22:
+            ```yaml
+            # OLD:
+            go-version: '1.23'
+
+            # NEW:
+            go-version: '1.26.1'
+            ```
+
+            Update all setup-go steps in the file (test, lint, docker jobs).
+
+            ### .github/workflows/release.yml
+            Update all setup-go steps to:
+            ```yaml
+            go-version: '1.26.1'
+            ```
+
+            ## Tests
+            - Verify YAML syntax: yamllint .github/workflows/*.yml (if available)
+            - Check for all occurrences: grep -r "go-version" .github/workflows/
+            - Ensure no instances of '1.23' or '1.24' remain
+
+            ## Verification Gate
+            ```bash
+            gofmt -l . && go build -v ./... && go vet ./... && go test -v -race ./...
+            ```
+
+            Note: CI workflows themselves will validate on next push (no way to test locally).
+
+            ## Constraints
+            - Do NOT modify any Go code
+            - Do NOT change other workflow configuration (only go-version field)
+            - Ensure version matches go.mod exactly: '1.26.1' (not '1.26' or '^1.26')
+            - Check both ci.yml and release.yml files thoroughly
+          files:
+            - .github/workflows/ci.yml
+            - .github/workflows/release.yml
+          dependencies:
+            - A
+      base_commit: 11e0c23d0987ee306b073cb717447ef3bfe097b2
+quality_gates:
+    level: standard
+    gates:
+        - type: build
+          command: go build -v ./...
+          required: true
+        - type: format
+          command: gofmt -l .
+          required: true
+          fix: true
+        - type: lint
+          command: go vet ./...
+          required: true
+        - type: test
+          command: go test -v -race ./...
+          required: true
+completion_reports:
+    A:
+        status: complete
+        branch: saw/production-security-hardening/wave1-agent-A
+        commit: e310ca5
+        files_changed:
+            - go.mod
+            - go.sum
+        verification: PASS
+    B:
+        status: complete
+        branch: saw/production-security-hardening/wave1-agent-B
+        commit: 7e33407f75ac4da955c8131cf2a098e06002c972
+        files_changed:
+            - handlers/secrets.go
+        files_created:
+            - handlers/validation.go
+            - handlers/validation_test.go
+        tests_added:
+            - TestValidateSecretName
+        verification: PASS
+    C:
+        status: complete
+        branch: saw/production-security-hardening/wave1-agent-C
+        commit: c9d073b
+        files_created:
+            - middleware/ratelimit.go
+            - middleware/ratelimit_test.go
+        tests_added:
+            - TestRateLimitNotExceeded
+            - TestRateLimitExceeded
+            - TestRateLimitBurstHandling
+            - TestRateLimitRecovery
+            - TestRateLimitConcurrentRequests
+            - TestRateLimitDifferentRPS
+        verification: PASS
+    D:
+        status: complete
+        branch: saw/production-security-hardening/wave1-agent-D
+        commit: "5469e70"
+        files_changed:
+            - middleware/security.go
+            - middleware/security_test.go
+        files_created:
+            - middleware/security.go
+            - middleware/security_test.go
+        tests_added:
+            - TestSecurityHeaders/all_headers_are_set_with_correct_values
+            - TestSecurityHeaders/headers_don't_interfere_with_JSON_responses
+            - TestSecurityHeaders/headers_are_set_before_handler_execution
+            - TestSecurityHeaders/headers_persist_through_handler_chain
+            - TestSecurityHeaders/headers_are_set_with_actual_HTTP_requests
+        verification: PASS
+    E:
+        status: complete
+        branch: saw/production-security-hardening/wave1-agent-E
+        commit: 7f21fdf
+        files_changed:
+            - handlers/secrets_integration_test.go
+            - handlers/testutil.go
+        files_created:
+            - handlers/secrets_integration_test.go
+            - handlers/testutil.go
+        tests_added:
+            - TestListSecrets_Success
+            - TestListSecrets_BackendError
+            - TestGetSecret_Success
+            - TestGetSecret_NotFound
+            - TestGetSecret_BackendError
+            - TestCreateSecret_Success
+            - TestCreateSecret_MissingName
+            - TestCreateSecret_MissingValue
+            - TestCreateSecret_AlreadyExists
+            - TestCreateSecret_BackendError
+            - TestCreateSecret_ExistsCheckError
+            - TestUpdateSecret_Success
+            - TestUpdateSecret_MissingValue
+            - TestUpdateSecret_NotFound
+            - TestUpdateSecret_BackendError
+            - TestUpdateSecret_ExistsCheckError
+            - TestDeleteSecret_Success
+            - TestDeleteSecret_NotFound
+            - TestDeleteSecret_BackendError
+            - TestDeleteSecret_ExistsCheckError
+        verification: 'PASS: 100% coverage on handlers/secrets.go, all 20 tests pass with race detector'
+    F:
+        status: complete
+        branch: saw/production-security-hardening/wave2-agent-F
+        commit: 8e15049
+        files_changed:
+            - cmd/server/main.go
+        verification: PASS
+    G:
+        status: complete
+        branch: saw/production-security-hardening/wave2-agent-G
+        commit: e97f9ee
+        files_changed:
+            - .github/workflows/ci.yml
+            - .github/workflows/release.yml
+        verification: PASS
+integration_connectors:
+    - file: handlers/secrets.go
+      reason: ""
+    - file: cmd/server/main.go
+      reason: ""
+    - file: cmd/server/main.go
+      reason: ""
+pre_mortem:
+    overall_risk: low
+    rows:
+        - scenario: Dependency update breaks transitive dependencies or introduces API breaking changes
+          likelihood: medium
+          impact: medium
+          mitigation: Agent A runs full test suite and build verification. If breaking changes detected, resolve by finding compatible intermediate versions or updating affected code.
+        - scenario: Rate limiting middleware blocks legitimate traffic or health checks
+          likelihood: low
+          impact: high
+          mitigation: Set conservative rate limit (100 RPS) which is well above normal API usage. Health endpoint is subject to rate limit but 100 RPS is sufficient for Kubernetes probes.
+        - scenario: Input validation is too strict and rejects valid secret names used in production
+          likelihood: low
+          impact: medium
+          mitigation: Validation rules match common secret naming conventions (alphanumeric, hyphens, underscores). If production systems use other characters, validation can be relaxed in follow-up.
+        - scenario: Test coverage target (80%) not achieved due to complex error paths
+          likelihood: low
+          impact: low
+          mitigation: Agent E focuses on integration tests covering all handlers. If 80% not reached, add more edge case tests or adjust target to realistic achievable level (e.g., 75%).
+        - scenario: Security headers break integration with existing reverse proxies or API gateways
+          likelihood: low
+          impact: low
+          mitigation: Headers are standard and defensive (e.g., HSTS only affects HTTPS deployments). If conflicts arise, headers can be conditionally disabled via environment variable in follow-up.
+        - scenario: Wave 2 integration reveals missing dependencies between Wave 1 agents
+          likelihood: low
+          impact: low
+          mitigation: Wave 1 agents are fully independent (no shared files). Wave 2 Agent F only integrates completed middleware without modifying Wave 1 code.
+critic_report:
+    verdict: PASS
+    agent_reviews: {}
+    summary: All agent briefs verified accurate against codebase. Interface contract error in Agent E MockBackend.ListItems was corrected.
+    reviewed_at: "2026-03-24T00:38:42Z"
+    issue_count: 0
+state: COMPLETE

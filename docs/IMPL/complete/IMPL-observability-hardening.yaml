@@ -1,0 +1,443 @@
+completion_date: "2026-03-24"
+title: Observability and Production Hardening - Medium Priority Improvements
+feature_slug: observability-hardening
+verdict: SUITABLE
+suitability_assessment: |
+    This feature addresses 3 medium-priority observability and production hardening issues from the codebase audit (issues #8, #9, #10):
+
+    1. Error Message Sanitization (Issue #8) - Prevent information disclosure by sanitizing backend errors
+    2. Structured Logging (Issue #9) - Replace unstructured log.Printf with go.uber.org/zap for observability
+    3. Gin Release Mode (Issue #10) - Configure production mode to disable debug logging and improve performance
+
+    Decomposition analysis:
+    - File ownership is cleanly disjoint across 3 agents in 2 waves
+    - Wave 1: 2 parallel agents (structured logging + Gin release mode)
+    - Wave 2: 1 agent (error sanitization using structured logger from Wave 1)
+    - No conflicting file modifications between agents
+    - All interfaces can be defined before implementation
+
+    Investigation requirements: NONE. All issues are well-defined from audit report.
+
+    Interface discoverability: FULL. All cross-agent interfaces are known:
+    - Logger initialization and global instance (pkg/logger/logger.go)
+    - sanitizeError function signature (handlers/errors.go)
+    - Updated middleware.Logger() function using structured logging
+
+    Pre-implementation status (per audit report):
+    - Issue #8 (error sanitization): TODO - handlers currently leak backend errors to clients
+    - Issue #9 (structured logging): TODO - middleware uses unstructured log.Printf
+    - Issue #10 (Gin release mode): TODO - gin.Default() used without release mode configuration
+
+    Parallelization value:
+    - Build/test cycle: 20-30 seconds (go build + test + vet)
+    - Agents own 2-4 files each (good granularity)
+    - Wave 1 has 2 independent agents (structured logging and Gin mode are completely separate)
+    - Task complexity: Mix of simple configuration (Gin mode, 3-5 min) and moderate refactoring (structured logging, 10-15 min; error sanitization, 8-12 min)
+
+    Estimated times:
+    - Scout phase: ~6 min (dependency mapping, interface contracts, IMPL doc)
+    - Agent execution: ~20 min (3 agents across 2 waves, accounting for parallelism)
+    - Merge & verification: ~3 min
+    Total SAW time: ~29 min
+
+    Sequential baseline: ~35 min (3 agents × ~12 min avg sequential time)
+    Time savings: ~6 min (17% faster)
+
+    Recommendation: Marginal speedup. The primary value here is coordination and audit trail rather than speed. The IMPL document provides clear interface contracts between structured logging and error sanitization, preventing integration issues. Wave structure ensures error sanitization uses the new logger correctly.
+test_command: go test -v -race -coverprofile=coverage.txt -covermode=atomic ./...
+lint_command: go vet ./...
+file_ownership:
+    - file: pkg/logger/logger.go
+      agent: A
+      wave: 1
+      action: new
+    - file: pkg/logger/logger_test.go
+      agent: A
+      wave: 1
+      action: new
+    - file: middleware/middleware.go
+      agent: A
+      wave: 1
+      action: modify
+    - file: middleware/middleware_test.go
+      agent: A
+      wave: 1
+      action: modify
+    - file: go.mod
+      agent: A
+      wave: 1
+      action: modify
+    - file: go.sum
+      agent: A
+      wave: 1
+      action: modify
+    - file: cmd/server/main.go
+      agent: B
+      wave: 1
+      action: modify
+    - file: Dockerfile
+      agent: B
+      wave: 1
+      action: modify
+    - file: handlers/errors.go
+      agent: C
+      wave: 2
+      action: new
+      depends_on:
+        - A
+    - file: handlers/errors_test.go
+      agent: C
+      wave: 2
+      action: new
+      depends_on:
+        - A
+    - file: handlers/secrets.go
+      agent: C
+      wave: 2
+      action: modify
+      depends_on:
+        - A
+interface_contracts:
+    - name: Logger Package
+      description: Global structured logger instance and initialization
+      definition: |
+        package logger
+
+        import "go.uber.org/zap"
+
+        var Log *zap.Logger
+
+        // Init initializes the global structured logger.
+        // Call once at application startup.
+        // mode: "production" or "development"
+        func Init(mode string) error {
+            var err error
+            if mode == "production" {
+                Log, err = zap.NewProduction()
+            } else {
+                Log, err = zap.NewDevelopment()
+            }
+            return err
+        }
+
+        // Sync flushes any buffered log entries.
+        // Call before application shutdown.
+        func Sync() error {
+            if Log != nil {
+                return Log.Sync()
+            }
+            return nil
+        }
+      location: pkg/logger/logger.go
+    - name: sanitizeError
+      description: Sanitizes backend errors for client responses while logging full details
+      definition: |
+        package handlers
+
+        // sanitizeError logs the full error details and returns a generic error message for the client.
+        // This prevents information disclosure while maintaining internal observability.
+        // Returns a generic "internal server error" message for all backend errors.
+        func sanitizeError(err error, context string) string
+      location: handlers/errors.go
+    - name: Updated Logger Middleware
+      description: Structured logging middleware using zap
+      definition: |
+        package middleware
+
+        import (
+            "time"
+            "github.com/gin-gonic/gin"
+            "go.uber.org/zap"
+            "github.com/blackwell-systems/vaultmux-server/pkg/logger"
+        )
+
+        // Logger returns a Gin middleware that logs HTTP requests using structured logging.
+        // Logs: method, status, path, client IP, latency, and any errors.
+        func Logger() gin.HandlerFunc {
+            return func(c *gin.Context) {
+                start := time.Now()
+                path := c.Request.URL.Path
+                if raw := c.Request.URL.RawQuery; raw != "" {
+                    path = path + "?" + raw
+                }
+
+                c.Next()
+
+                latency := time.Since(start)
+
+                logger.Log.Info("request",
+                    zap.String("method", c.Request.Method),
+                    zap.Int("status", c.Writer.Status()),
+                    zap.String("path", path),
+                    zap.String("client_ip", c.ClientIP()),
+                    zap.Duration("latency", latency),
+                )
+            }
+        }
+      location: middleware/middleware.go
+waves:
+    - number: 1
+      agents:
+        - id: A
+          task: |
+            Implement structured logging using go.uber.org/zap to replace unstructured log.Printf calls (Issue #9).
+
+            ## What to implement
+
+            1. Create pkg/logger/logger.go with global logger initialization
+            2. Add go.uber.org/zap dependency to go.mod
+            3. Update middleware/middleware.go Logger() to use structured logging
+            4. Update middleware/middleware_test.go to test structured logger middleware
+
+            ## Interface contracts
+
+            Logger package exports:
+            - `var Log *zap.Logger` - global logger instance
+            - `func Init(mode string) error` - initializes logger ("production" or "development" mode)
+            - `func Sync() error` - flushes buffered logs
+
+            Logger() middleware:
+            - Logs request metadata: method, status, path, client_ip, latency
+            - Uses logger.Log.Info() with zap structured fields
+            - No changes to function signature (remains gin.HandlerFunc)
+
+            ## Tests required
+
+            pkg/logger/logger_test.go:
+            - TestInit_ProductionMode: verify production logger initialization
+            - TestInit_DevelopmentMode: verify development logger initialization
+            - TestSync: verify Sync() does not panic when logger is nil or initialized
+
+            middleware/middleware_test.go updates:
+            - Update TestLogger to verify structured log output format
+            - Test that logger.Log.Info is called with correct zap fields
+            - Use zaptest.NewLogger for test logger instance
+
+            ## Verification gate
+
+            ```bash
+            go build ./...
+            go vet ./...
+            go test -v -race ./pkg/logger ./middleware
+            ```
+
+            ## Constraints and warnings
+
+            - Do NOT modify cmd/server/main.go (Agent B owns it, will initialize logger)
+            - Do NOT modify handlers/* (Agent C will integrate sanitizeError)
+            - Logger must be initialized before first use (main.go will call logger.Init())
+            - Use zap.NewProduction() for production mode (JSON format, info level)
+            - Use zap.NewDevelopment() for development mode (console format, debug level)
+            - Logger.Sync() must be called before application shutdown to flush buffers
+          files:
+            - pkg/logger/logger.go
+            - pkg/logger/logger_test.go
+            - middleware/middleware.go
+            - middleware/middleware_test.go
+            - go.mod
+            - go.sum
+        - id: B
+          task: |
+            Configure Gin to run in release mode for production deployments (Issue #10).
+
+            ## What to implement
+
+            1. Update cmd/server/main.go to set gin.ReleaseMode based on GIN_MODE environment variable
+            2. Replace gin.Default() with gin.New() for explicit middleware control
+            3. Update Dockerfile to set GIN_MODE=release environment variable
+            4. Initialize structured logger (logger.Init) and defer logger.Sync()
+
+            ## Interface contracts
+
+            None - this agent is independent of Wave 1 Agent A, but coordinates on cmd/server/main.go structure.
+
+            main.go changes:
+            - Read GIN_MODE environment variable (default: "release" if not set)
+            - Call gin.SetMode(gin.ReleaseMode) if GIN_MODE is "release" or empty
+            - Replace `r := gin.Default()` with `r := gin.New()`
+            - Keep existing middleware registrations (Logger, Recovery, SecurityHeaders, RateLimitMiddleware)
+            - Call logger.Init() after gin mode setup, before creating router
+            - Defer logger.Sync() after logger.Init()
+
+            Dockerfile changes:
+            - Add ENV GIN_MODE=release after COPY --from=builder line
+
+            ## Tests required
+
+            No new test files (cmd/server/main.go is integration code).
+
+            Manual verification:
+            - Build Docker image and verify GIN_MODE=release is set
+            - Start server and verify no debug output (release mode active)
+            - Verify structured logs appear in JSON format
+
+            ## Verification gate
+
+            ```bash
+            go build ./cmd/server
+            docker build -t vaultmux-server:test .
+            docker run --rm -e VAULTMUX_BACKEND=awssecrets vaultmux-server:test --help
+            ```
+
+            ## Constraints and warnings
+
+            - gin.SetMode() must be called BEFORE gin.New() (Gin requirement)
+            - Default to release mode if GIN_MODE is empty (production-safe default)
+            - Preserve all existing middleware registrations in same order
+            - Logger initialization (logger.Init) depends on Agent A's logger package, but Agent B runs in parallel because logger.Init is a runtime call, not a compile-time dependency
+            - If logger.Init fails, log.Fatalf and exit (fatal error, cannot continue)
+          files:
+            - cmd/server/main.go
+            - Dockerfile
+      base_commit: 63b6609be38dd7ee08c970b4593559c9129af50a
+    - number: 2
+      agents:
+        - id: C
+          task: |
+            Implement error message sanitization to prevent information disclosure (Issue #8).
+
+            ## What to implement
+
+            1. Create handlers/errors.go with sanitizeError function
+            2. Update handlers/secrets.go to use sanitizeError for all backend errors
+            3. Create handlers/errors_test.go to test error sanitization
+
+            ## Interface contracts
+
+            sanitizeError function:
+            - Signature: `func sanitizeError(err error, context string) string`
+            - Logs full error details using logger.Log.Error() with context
+            - Returns generic "internal server error" message for all errors
+            - Context parameter describes where error occurred (e.g., "list secrets", "get secret")
+
+            handlers/secrets.go changes:
+            - Replace all `gin.H{"error": err.Error()}` with `gin.H{"error": sanitizeError(err, "<context>")}`
+            - Apply to lines: 43, 68, 92, 101, 124, 132, 148, 157 (all backend error returns)
+            - Do NOT sanitize validation errors (400 Bad Request) - those are client errors, not backend leaks
+            - Do NOT sanitize "secret not found" (404) or "secret already exists" (409) - these are expected user-facing messages
+
+            ## Tests required
+
+            handlers/errors_test.go:
+            - TestSanitizeError_LogsFullError: verify full error is logged via logger.Log
+            - TestSanitizeError_ReturnsGenericMessage: verify return value is generic
+            - TestSanitizeError_WithContext: verify context is included in log
+            - Use zaptest.NewLogger to capture log output for assertions
+
+            handlers/secrets_test.go updates (if exists):
+            - Update existing error assertions to expect sanitized messages
+            - Verify 500 errors return "internal server error" instead of raw backend errors
+
+            ## Verification gate
+
+            ```bash
+            go build ./...
+            go vet ./...
+            go test -v -race ./handlers
+            ```
+
+            ## Constraints and warnings
+
+            - Depends on Agent A's logger package (logger.Log must be initialized)
+            - Only sanitize 500 Internal Server Error responses (backend errors)
+            - Do NOT sanitize 400/404/409 errors (those are intentional user-facing messages)
+            - Log full error with context for internal debugging/monitoring
+            - Use logger.Log.Error() with zap.Error(err) and zap.String("context", context)
+            - Generic message must be exactly "internal server error" (lowercase, no punctuation) for consistency
+          files:
+            - handlers/errors.go
+            - handlers/errors_test.go
+            - handlers/secrets.go
+          dependencies:
+            - A
+      base_commit: 63b6609be38dd7ee08c970b4593559c9129af50a
+quality_gates:
+    level: standard
+    gates:
+        - type: build
+          command: go build ./...
+          required: true
+        - type: lint
+          command: go vet ./...
+          required: true
+        - type: test
+          command: go test -v -race ./...
+          required: true
+completion_reports:
+    A:
+        status: complete
+        branch: saw/observability-hardening/wave1-agent-A
+        commit: ead1dfc50da880ed74a2a83df89212cb0d69cb65
+        files_changed:
+            - go.mod
+            - go.sum
+            - middleware/middleware.go
+            - middleware/middleware_test.go
+        files_created:
+            - pkg/logger/logger.go
+            - pkg/logger/logger_test.go
+        tests_added:
+            - TestInit_ProductionMode
+            - TestInit_DevelopmentMode
+            - TestSync
+            - TestLogger_StructuredFields
+        verification: PASS
+    B:
+        status: complete
+        branch: saw/observability-hardening/wave1-agent-B
+        commit: aeebb25
+        files_changed:
+            - cmd/server/main.go
+            - Dockerfile
+        verification: PASS
+    C:
+        status: complete
+        branch: saw/observability-hardening/wave2-agent-C
+        commit: 9408fa2
+        files_changed:
+            - handlers/errors.go
+            - handlers/errors_test.go
+            - handlers/secrets.go
+        files_created:
+            - handlers/errors.go
+            - handlers/errors_test.go
+        tests_added:
+            - TestSanitizeError_LogsFullError
+            - TestSanitizeError_ReturnsGenericMessage
+            - TestSanitizeError_WithContext
+        verification: PASS
+pre_mortem:
+    overall_risk: low
+    rows:
+        - scenario: Logger initialization fails in production causing startup failure
+          likelihood: low
+          impact: high
+          mitigation: Agent A tests both production and development mode initialization. Agent B includes error handling for logger.Init() failure with log.Fatalf to fail fast on startup.
+        - scenario: Structured logging breaks existing log parsing/monitoring
+          likelihood: medium
+          impact: low
+          mitigation: Zap production mode outputs JSON format which is more parseable than unstructured logs. Document the format change in commit message. JSON format is standard for production logging.
+        - scenario: Error sanitization removes too much information making debugging impossible
+          likelihood: low
+          impact: medium
+          mitigation: sanitizeError logs full error details internally before sanitizing. Operators have access to full error context in logs while clients only see generic message.
+        - scenario: GIN_MODE not set in deployment causing debug mode in production
+          likelihood: low
+          impact: medium
+          mitigation: Agent B defaults to release mode if GIN_MODE is empty. Dockerfile explicitly sets GIN_MODE=release. Production-safe default prevents accidental debug mode.
+critic_report:
+    verdict: PASS
+    agent_reviews:
+        A:
+            agent_id: A
+            verdict: PASS
+        B:
+            agent_id: B
+            verdict: PASS
+        C:
+            agent_id: C
+            verdict: PASS
+    summary: 'All agent briefs verified against codebase. File ownership, symbol references, patterns, interface contracts, import chains, and side effect completeness all check out. Zero errors found across 3 agents. Minor observations: Agent C''s brief mentions line numbers (43, 68, 92, 101, 124, 132, 148, 157) that are illustrative rather than definitive - actual line numbers are 43, 68, 92, 101, 123, 132, 148, 157 (line 124 is offset by 1). This is a cosmetic discrepancy and does not block execution as the brief correctly identifies all 8 StatusInternalServerError locations that need sanitization.'
+    reviewed_at: "2026-03-24T01:13:09Z"
+    issue_count: 0
+state: COMPLETE
